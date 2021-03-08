@@ -210,7 +210,7 @@ def resnet_graph(input_image, architecture, stage5=False, train_bn=True):
 ############################################################
 #  Proposal Layer（将RPN得到的结果转化为region proposals  包括非极大值抑制（NSM）和坐标的转换）
 ############################################################
-
+# 坐标的转化函数
 def apply_box_deltas_graph(boxes, deltas):
     """Applies the given deltas to the given boxes.
     boxes: [N, (y1, x1, y2, x2)] boxes to update
@@ -271,7 +271,9 @@ class ProposalLayer(KE.Layer):
     def __init__(self, proposal_count, nms_threshold, config=None, **kwargs):
         super(ProposalLayer, self).__init__(**kwargs)
         self.config = config
+        #proposal的数目
         self.proposal_count = proposal_count
+        # 非极大值抑制的阈值
         self.nms_threshold = nms_threshold
 
     def call(self, inputs):
@@ -334,7 +336,7 @@ class ProposalLayer(KE.Layer):
 
 
 ############################################################
-#  ROIAlign Layer
+#  ROIAlign Layer（进行ROIAlign层的操作，将proposal层得到的proposal转化为固定的大小）
 ############################################################
 
 def log2_graph(x):
