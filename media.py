@@ -31,7 +31,10 @@ import os
 import sys
 import time
 import numpy as np
-import imgaug  # https://github.com/aleju/imgaug (pip3 install imgaug)
+# import imgaug  # https://github.com/aleju/imgaug (pip3 install imgaug)
+
+from imgaug import augmenters as iaa #引入数据增强的包
+
 import tensorflow as tf
 import keras.backend.tensorflow_backend as KTF
 
@@ -303,7 +306,9 @@ def train(model):
     # 在默认的config（MediaConfig类）中，默认将mrcnn_material_loss的权重设为0
     # 也就是说，不训练material的分类，先做好原先的餐具分类、找轮廓的任务
     print("Training network heads")
-    augmentation = imgaug.augmenters.Fliplr(0.5)
+    # augmentation = imgaug.augmenters.Fliplr(0.5)
+    augmentation = iaa.Fliplr(0.5)
+
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE,
                 epochs=60,

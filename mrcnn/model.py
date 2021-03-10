@@ -86,7 +86,7 @@ def compute_backbone_shapes(config, image_shape):
 
 
 ############################################################
-#  Resnet Graph
+#  Resnet Graph（ResNet网络50 or 101）
 ############################################################
 
 # Code adopted from:
@@ -207,7 +207,7 @@ def resnet_graph(input_image, architecture, stage5=False, train_bn=True):
 
 
 ############################################################
-#  Proposal Layer
+#  Proposal Layer（）
 ############################################################
 
 def apply_box_deltas_graph(boxes, deltas):
@@ -333,7 +333,7 @@ class ProposalLayer(KE.Layer):
 
 
 ############################################################
-#  ROIAlign Layer
+#  ROIAlign Layer(对获得的proposal进行处理)
 ############################################################
 
 def log2_graph(x):
@@ -1114,7 +1114,7 @@ def build_rpn_model(anchor_stride, anchors_per_location, depth):
 
 
 ############################################################
-#  Feature Pyramid Network Heads
+#  Feature Pyramid Network Heads（多任务的分支 包含类别、box、mask三个多任务）
 ############################################################
 
 def fpn_classifier_graph(rois, feature_maps, image_meta,
@@ -1139,6 +1139,16 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
         bbox_deltas: [batch, num_rois, NUM_CLASSES, (dy, dx, log(dh), log(dw))] Deltas to apply to
                      proposal boxes
     """
+    '''              =>Conv ==> Conv ==> Fc -> component
+     _________      /
+    |  |  |   |  ===                     ==>Fc -> BOX
+    |__|__|___|     \                   /
+                     =>Conv ==> Conv ==> 
+                                        \ 
+                                         ==>Fc -> class
+    '''
+
+
     # ROI Pooling
     # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
     x = PyramidROIAlign([pool_size, pool_size],
