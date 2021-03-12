@@ -229,44 +229,65 @@ def augmentation_demo(image_id, augmentation):
             """Determines which augmenters to apply to masks."""
             return augmenter.__class__.__name__ in MASK_AUGMENTERS
 
+        segmap = SegmentationMapsOnImage(mask[:, :, 0], shape=image.shape)
         # Store shapes before augmentation to compare
         image_shape = image.shape
         mask_shape = mask.shape
         print("the shape of mask_shape:", mask_shape)
-        # Make augmenters deterministic to apply similarly to images and masks
-        # det = augmentation.to_deterministic()
-        # image = det.augment_image(image)
-        # # Change mask to np.uint8 because imgaug doesn't support np.bool
-        # mask = det.augment_image(mask.astype(np.uint8),
-        #                          hooks=imgaug.HooksImages(activator=hook))
 
-        segmap = SegmentationMapsOnImage(mask[:, :, 1], shape=image.shape)
-        # Augment images and segmaps.
-        images_aug = []
-        segmaps_aug = []
-        for _ in range(5):
-            images_aug_i, segmaps_aug_i = seq(image=image, segmentation_maps=segmap)
-            images_aug.append(images_aug_i)
-            segmaps_aug.append(segmaps_aug_i)
+        image_augs = []
+        mask_augs = []
+        # Make augmenters deterministic to apply similarly to images and masks
+        for _ in range(3):
+            det = augmentation.to_deterministic()
+
+            image_aug = det.augment_image(image)
+            # Change mask to np.uint8 because imgaug doesn't support np.bool
+            mask_aug = det.augment_image(mask.astype(np.uint8),
+                                        hooks=imgaug.HooksImages(activator=hook))
+
+            segmap_aug = SegmentationMapsOnImage(mask_aug[:, :, 0], shape=image_aug.shape)
+            image_augs.append(image_aug)
+            mask_augs.append(segmap_aug)
+
+
         cells = []
-        for image_aug, segmap_aug in zip(images_aug, segmaps_aug):
+        for image_aug, segmap_aug in zip(image_augs, mask_augs):
             cells.append(image)  # column 1
             cells.append(segmap.draw_on_image(image)[0])  # column 2
             cells.append(image_aug)  # column 3
             cells.append(segmap_aug.draw_on_image(image_aug)[0])  # column 4
             cells.append(segmap_aug.draw(size=image_aug.shape[:2])[0])  # column 5
-
-        # Convert cells to a grid image and save.
+        # # Convert cells to a grid image and save.
         grid_image = ia.draw_grid(cells, cols=5)
         imageio.imwrite("./example_segmaps.jpg", grid_image)
 
+        # # Augment images and segmaps.
+        # images_aug = []
+        # segmaps_aug = []
+        # for _ in range(10):
+        #     images_aug_i, segmaps_aug_i = seq(image=image, segmentation_maps=segmap)
+        #     images_aug.append(images_aug_i)
+        #     segmaps_aug.append(segmaps_aug_i)
+        # cells = []
+        # for image_aug, segmap_aug in zip(images_aug, segmaps_aug):
+        #     cells.append(image)  # column 1
+        #     cells.append(segmap.draw_on_image(image)[0])  # column 2
+        #     cells.append(image_aug)  # column 3
+        #     cells.append(segmap_aug.draw_on_image(image_aug)[0])  # column 4
+        #     cells.append(segmap_aug.draw(size=image_aug.shape[:2])[0])  # column 5
+        #
+        # # Convert cells to a grid image and save.
+        # grid_image = ia.draw_grid(cells, cols=5)
+        # imageio.imwrite("./example_segmaps.jpg", grid_image)
 
-        print("the shape of mask is:", mask.shape)
-        print("mask[:,:,0]:", mask[:, :, 0])
-        print("mask[:,:,1]:", mask[:, :, 1])
-        print("the type of mask:", type(mask))
-        print("class of mask[:,:,0]:", np.unique(mask[:, :, 0]))
-        print("class of mask[:,:,1]", np.unique(mask[:, :, 1]))
+
+        print("the shape of mask_aug is:", mask_aug.shape)
+        # print("mask[:,:,0]:", mask[:, :, 0])
+        # print("mask[:,:,1]:", mask[:, :, 1])
+        # print("the type of mask:", type(mask))
+        # print("class of mask[:,:,0]:", np.unique(mask[:, :, 0]))
+        # print("class of mask[:,:,1]", np.unique(mask[:, :, 1]))
 
 
         # Verify that shapes didn't change
@@ -280,20 +301,23 @@ def augmentation_demo(image_id, augmentation):
 
 if __name__ == '__main__':
     sometimes = lambda aug: iaa.Sometimes(0.5, aug)
-    image_id = 1
+    image_id = 8
 
     seq = iaa.Sequential([
-        iaa.Fliplr(0.5),  # drop 5% or 20% of all pixels
-        iaa.Flipud(0.5),  # sharpen the image
-        sometimes(iaa.Affine(                          
+        iaa.Dropout([0.05, 0.2]),# drop 5% or 20% of all pixels
+        iaa.Sharpen((0.0, 1.0)),# sharpen the image
+        iaa.Fliplr(0.5),
+        iaa.Flipud(0.5),
+        sometimes(iaa.Affine(
             scale={"x": (0.8, 1.2), "y": (0.8, 1.2)},
             translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)},
-            rotate=(-45, 45),  
-            shear=(-16, 16),    
-            order=[0, 1],   
-            cval=(0, 255),  
-            mode=ia.ALL   
+            rotate=(-45, 45),
+            shear=(-16, 16),
+            order=[0, 1],
+            cval=(0, 255),
+            mode=ia.ALL
         )),
+        sometimes(iaa.ElasticTransformation(alpha=50, sigma=5))
     ], random_order=True)
 
     augmentation_demo(image_id, augmentation=seq)

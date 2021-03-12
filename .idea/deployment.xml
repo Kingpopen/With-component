@@ -5,7 +5,14 @@
       <paths name="With-component">
         <serverdata>
           <mappings>
-            <mapping deploy="/" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/home/pengjinbo/kingpopen/Car/With_component" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="pengjinbo@211.66.87.26:22 password">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/pengjinbo/kingpopen/Car/With_component/" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>
