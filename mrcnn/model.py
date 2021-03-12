@@ -1172,6 +1172,15 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
         bbox_deltas: [batch, num_rois, NUM_CLASSES, (dy, dx, log(dh), log(dw))] Deltas to apply to
                      proposal boxes
     """
+    '''                 =>Conv ==> Conv ==> Fc -> component
+        _________      /
+       |  |  |   |  ===                     ==>Fc -> BOX
+       |__|__|___|     \                   /
+                        =>Conv ==> Conv ==> 
+                                           \ 
+                                            ==>Fc -> class
+       '''
+
     # ROI Pooling
     # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
     x = PyramidROIAlign([pool_size, pool_size],
@@ -2786,7 +2795,9 @@ class MaskRCNN():
         layer_regex = {
             # all layers but the backbone
             "heads": r"(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
-            "component-classifiers": r"(mrcnn_component\_.*)",
+            # "component-classifiers": r"(mrcnn_component\_.*)“,
+            # 添加了多训练rpn、fpn的操作
+            "component-classifiers": r"(mrcnn_component\_.*)|(rpn\_.*)|(fpn\_.*)",
             "heads-no-component": r"(mrcnn_class\_.*)|(mrcnn_bbox\_.*)|(rpn\_.*)|(fpn\_.*)",
             "temp": r"(mrcnn\_.*)",
             # From a specific Resnet stage and up

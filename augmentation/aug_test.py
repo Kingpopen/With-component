@@ -16,7 +16,7 @@ import imageio
 
 DEFAULT_DATASET_YEAR = "2017"
 config = Config()
-ia.seed(1)
+ia.seed(2)
 
 class CarDamageDataset(utils.Dataset):
 
@@ -238,7 +238,7 @@ def augmentation_demo(image_id, augmentation):
         image_augs = []
         mask_augs = []
         # Make augmenters deterministic to apply similarly to images and masks
-        for _ in range(3):
+        for _ in range(6):
             det = augmentation.to_deterministic()
 
             image_aug = det.augment_image(image)
@@ -304,20 +304,24 @@ if __name__ == '__main__':
     image_id = 8
 
     seq = iaa.Sequential([
-        iaa.Dropout([0.05, 0.2]),# drop 5% or 20% of all pixels
-        iaa.Sharpen((0.0, 1.0)),# sharpen the image
-        iaa.Fliplr(0.5),
-        iaa.Flipud(0.5),
-        sometimes(iaa.Affine(
-            scale={"x": (0.8, 1.2), "y": (0.8, 1.2)},
-            translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)},
-            rotate=(-45, 45),
-            shear=(-16, 16),
-            order=[0, 1],
-            cval=(0, 255),
-            mode=ia.ALL
-        )),
-        sometimes(iaa.ElasticTransformation(alpha=50, sigma=5))
+
+        iaa.SomeOf((0, 4),
+                   [
+                       sometimes(iaa.Dropout([0.05, 0.2])),  # drop 5% or 20% of all pixels
+                       sometimes(iaa.Sharpen((0.0, 1.0))),  # sharpen the image
+                       sometimes(iaa.Fliplr(0.2)),
+                       sometimes(iaa.Flipud(0.2)),
+                       sometimes(iaa.Affine(
+                           scale={"x": (0.8, 1.2), "y": (0.8, 1.2)},
+                           translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)},
+                           rotate=(-45, 45),
+                           shear=(-16, 16),
+                           order=[0, 1],
+                           cval=(0, 255),
+                           mode=ia.ALL
+                       )),
+                       sometimes(iaa.ElasticTransformation(alpha=50, sigma=5))
+                   ]),
     ], random_order=True)
 
     augmentation_demo(image_id, augmentation=seq)

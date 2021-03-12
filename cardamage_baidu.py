@@ -97,7 +97,7 @@ class CarDamageConfig(Config):
     to the COCO dataset.
     """
     # Give the configuration a recognizable name
-    NAME = "Cardamage_ali"
+    NAME = "Cardamage_baidu"
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
@@ -111,7 +111,7 @@ class CarDamageConfig(Config):
     # NUM_CLASSES = 1 + 8  # 只需要餐具的种类数即可，不需要材料的种类?
     # NUM_MATERIALS = 1 + 5
     NUM_CLASSES = 1 + 4
-    NUM_COMPONENTS = 1 + 6
+    NUM_COMPONENTS = 1 + 13
 
     BACKBONE = "resnet50"
 
@@ -337,7 +337,7 @@ class CarDamageDataset(utils.Dataset):
 
 def train(model):
     dataset_train = CarDamageDataset()
-    dataset_train.load_cardamage('/home/pengjinbo/kingpopen/Car/dataset1_ali/train/', "train", year='2017')
+    dataset_train.load_cardamage('/home/pengjinbo/kingpopen/Car/dataset2/train/', "train", year='2017')
     dataset_train.prepare()
 
     num_train = len(dataset_train.image_ids)
@@ -345,7 +345,7 @@ def train(model):
     # print("train dataset ok")
 
     dataset_val = CarDamageDataset()
-    dataset_val.load_cardamage('/home/pengjinbo/kingpopen/Car/dataset1_ali/val/', "val", year='2017')
+    dataset_val.load_cardamage('/home/pengjinbo/kingpopen/Car/dataset2/val/', "val", year='2017')
     dataset_val.prepare()
 
     num_val = len(dataset_val.image_ids)
@@ -367,9 +367,10 @@ def train(model):
     print("Training network heads")
     # augmentation = imgaug.augmenters.Fliplr(0.5)
 
+    # 添加在线数据增强操作
     sometimes = lambda aug: iaa.Sometimes(0.5, aug)
     augmentation = iaa.Sequential([
-
+        # 从下面6种操作中选择0-4种
         iaa.SomeOf((0, 4),
                    [
                        sometimes(iaa.Dropout([0.05, 0.2])),  # drop 5% or 20% of all pixels
