@@ -500,12 +500,11 @@ def mask_to_seg(mask):
 def save_to_json(imageHeight, imageWidth, boxes, masks, class_ids, component_ids,
                  save_name, save_dir):
     class_names = ['__background', 'scratch', 'indentation', 'crack', 'perforation']
-    # component_names = ['__background', 'front bumper', 'rear bumper', 'front fender',
-    #                    'rear fender', 'door', 'rear taillight', 'headlight',
-    #                    'hood', 'luggage cover', 'radiator grille', 'bottom side',
-    #                    'rearview mirror', 'license plate']
+    component_names = ['__background', 'front bumper', 'rear bumper', 'front fender',
+                       'rear fender', 'door', 'rear taillight', 'headlight',
+                       'hood', 'luggage cover', 'radiator grille', 'bottom side',
+                       'rearview mirror', 'license plate']
 
-    component_names = ['__background', "bumper", "fender", "light", "rearview", "windshield", "others"]
 
     N = boxes.shape[0]
     bbox = []
