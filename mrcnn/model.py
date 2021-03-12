@@ -86,7 +86,7 @@ def compute_backbone_shapes(config, image_shape):
 
 
 ############################################################
-#  Resnet Graph（ResNet网络50 or 101）
+#  Resnet Graph
 ############################################################
 
 # Code adopted from:
@@ -207,7 +207,7 @@ def resnet_graph(input_image, architecture, stage5=False, train_bn=True):
 
 
 ############################################################
-#  Proposal Layer（）
+#  Proposal Layer
 ############################################################
 
 def apply_box_deltas_graph(boxes, deltas):
@@ -333,7 +333,7 @@ class ProposalLayer(KE.Layer):
 
 
 ############################################################
-#  ROIAlign Layer(对获得的proposal进行处理)
+#  ROIAlign Layer
 ############################################################
 
 def log2_graph(x):
@@ -483,7 +483,7 @@ def overlaps_graph(boxes1, boxes2):
     return overlaps
 
 
-def detection_targets_graph_mat(proposals, gt_class_ids, gt_material_ids, gt_boxes, gt_masks, config):
+def detection_targets_graph_mat(proposals, gt_class_ids, gt_component_ids, gt_boxes, gt_masks, config):
     """Generates detection targets for one image. Subsamples proposals and
     generates target class IDs, bounding box deltas, and masks for each.
 
@@ -520,8 +520,12 @@ def detection_targets_graph_mat(proposals, gt_class_ids, gt_material_ids, gt_box
     gt_class_ids = tf.boolean_mask(gt_class_ids, non_zeros,
                                    name="trim_gt_class_ids")
     # 依葫芦画瓢，添加材料分类
-    gt_material_ids = tf.boolean_mask(gt_material_ids, non_zeros,
-                                      name="trim_gt_material_ids")
+    # gt_material_ids = tf.boolean_mask(gt_material_ids, non_zeros,
+    #                                   name="trim_gt_material_ids")
+    #添加零件分支
+    gt_component_ids = tf.boolean_mask(gt_component_ids, non_zeros,
+                                      name="trim_gt_component_ids")
+
     gt_masks = tf.gather(gt_masks, tf.where(non_zeros)[:, 0], axis=2,
                          name="trim_gt_masks")
 
@@ -535,7 +539,11 @@ def detection_targets_graph_mat(proposals, gt_class_ids, gt_material_ids, gt_box
     # for example, gt_class_ids aims at choosing those items that is_crowd == 0
     gt_class_ids = tf.gather(gt_class_ids, non_crowd_ix)
     # 依葫芦画瓢，添加材料分类
-    gt_material_ids = tf.gather(gt_material_ids, non_crowd_ix)
+    # gt_material_ids = tf.gather(gt_material_ids, non_crowd_ix)
+
+    #添加零件分支
+    gt_component_ids = tf.gather(gt_component_ids, non_crowd_ix)
+
     gt_boxes = tf.gather(gt_boxes, non_crowd_ix)
     gt_masks = tf.gather(gt_masks, non_crowd_ix, axis=2)
 
@@ -579,7 +587,10 @@ def detection_targets_graph_mat(proposals, gt_class_ids, gt_material_ids, gt_box
     roi_gt_boxes = tf.gather(gt_boxes, roi_gt_box_assignment)
     roi_gt_class_ids = tf.gather(gt_class_ids, roi_gt_box_assignment)
     # 依葫芦画瓢，添加材料分类
-    roi_gt_material_ids = tf.gather(gt_material_ids, roi_gt_box_assignment)
+    # roi_gt_material_ids = tf.gather(gt_material_ids, roi_gt_box_assignment)
+
+    #添加零件分类
+    roi_gt_component_ids = tf.gather(gt_component_ids, roi_gt_box_assignment)
 
     # Compute bbox refinement for positive ROIs
     deltas = utils.box_refinement_graph(positive_rois, roi_gt_boxes)
@@ -625,11 +636,15 @@ def detection_targets_graph_mat(proposals, gt_class_ids, gt_material_ids, gt_box
     roi_gt_boxes = tf.pad(roi_gt_boxes, [(0, N + P), (0, 0)])
     roi_gt_class_ids = tf.pad(roi_gt_class_ids, [(0, N + P)])
     # 依葫芦画瓢，添加材料分类
-    roi_gt_material_ids = tf.pad(roi_gt_material_ids, [(0, N + P)])
+    # roi_gt_material_ids = tf.pad(roi_gt_material_ids, [(0, N + P)])
+
+    # 添加零件分类
+    roi_gt_component_ids = tf.pad(roi_gt_component_ids, [(0, N + P)])
+
     deltas = tf.pad(deltas, [(0, N + P), (0, 0)])
     masks = tf.pad(masks, [[0, N + P], (0, 0), (0, 0)])
 
-    return rois, roi_gt_class_ids, roi_gt_material_ids, deltas, masks
+    return rois, roi_gt_class_ids, roi_gt_component_ids, deltas, masks
 
 def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config):
     """Generates detection targets for one image. Subsamples proposals and
@@ -800,15 +815,19 @@ class DetectionTargetLayer_mat(KE.Layer):
     def call(self, inputs):
         proposals = inputs[0]
         gt_class_ids = inputs[1]
-        gt_material_ids = inputs[2]
+        gt_component_ids = inputs[2]
         gt_boxes = inputs[3]
         gt_masks = inputs[4]
 
         # Slice the batch and run a graph for each slice
         # 增加了material_ids相关内容
-        names = ["rois", "target_class_ids", "target_material_ids", "target_bbox", "target_mask"]
+        # names = ["rois", "target_class_ids", "target_material_ids", "target_bbox", "target_mask"]
+        names = ["rois", "target_class_ids", "target_component_ids", "target_bbox", "target_mask"]
+
+
+
         outputs = utils.batch_slice(
-            [proposals, gt_class_ids, gt_material_ids, gt_boxes, gt_masks],
+            [proposals, gt_class_ids, gt_component_ids, gt_boxes, gt_masks],
             lambda v, w, x, y, z: detection_targets_graph_mat(
                 v, w, x, y, z, self.config),
             self.config.IMAGES_PER_GPU, names=names)
@@ -907,12 +926,23 @@ def refine_detections_graph(rois, probs, probs_mat, deltas, window, config):
     # Class IDs per ROI
     class_ids = tf.argmax(probs, axis=1, output_type=tf.int32)
     # 依葫芦画瓢，增加了material_ids
-    material_ids = tf.argmax(probs_mat, axis=1, output_type=tf.int32)
+    # material_ids = tf.argmax(probs_mat, axis=1, output_type=tf.int32)
+    #添加零件分类
+    component_ids = tf.argmax(probs_mat, axis=1, output_type=tf.int32)
+
     # Class probability of the top class of each ROI
     indices = tf.stack([tf.range(probs.shape[0]), class_ids], axis=1)
+    component_indices = tf.stack([tf.range(probs_mat.shape[0]), component_ids], axis=1)
+    # print("indices:", indices)
+
     class_scores = tf.gather_nd(probs, indices)
     # 依葫芦画瓢，增加了material_ids
-    material_scores = tf.gather_nd(probs_mat, indices)
+    # material_scores = tf.gather_nd(probs_mat, indices)
+
+    #添加零件分类
+    component_scores = tf.gather_nd(probs_mat, component_indices)
+    # print("component_scores::", component_scores)
+
     # Class-specific bounding box deltas
     deltas_specific = tf.gather_nd(deltas, indices)
     # Apply bounding box deltas
@@ -973,7 +1003,10 @@ def refine_detections_graph(rois, probs, probs_mat, deltas, window, config):
     # Keep top detections
     roi_count = config.DETECTION_MAX_INSTANCES
     class_scores_keep = tf.gather(class_scores, keep)
-    material_scores_keep = tf.gather(material_scores, keep)
+
+    # material_scores_keep = tf.gather(material_scores, keep)
+    component_scores_keep = tf.gather(component_scores, keep)
+
     num_keep = tf.minimum(tf.shape(class_scores_keep)[0], roi_count)
     top_ids = tf.nn.top_k(class_scores_keep, k=num_keep, sorted=True)[1]
     keep = tf.gather(keep, top_ids)
@@ -985,8 +1018,8 @@ def refine_detections_graph(rois, probs, probs_mat, deltas, window, config):
         tf.gather(refined_rois, keep),
         tf.to_float(tf.gather(class_ids, keep))[..., tf.newaxis],
         tf.gather(class_scores, keep)[..., tf.newaxis],
-        tf.to_float(tf.gather(material_ids, keep))[..., tf.newaxis],
-        tf.gather(material_scores, keep)[..., tf.newaxis]
+        tf.to_float(tf.gather(component_ids, keep))[..., tf.newaxis],
+        tf.gather(component_scores, keep)[..., tf.newaxis]
         ], axis=1)
 
     # Pad with zeros if detections < DETECTION_MAX_INSTANCES
@@ -1011,7 +1044,7 @@ class DetectionLayer(KE.Layer):
     def call(self, inputs):
         rois = inputs[0]
         mrcnn_class = inputs[1]
-        mrcnn_material = inputs[2]
+        mrcnn_component = inputs[2]
         mrcnn_bbox = inputs[3]
         image_meta = inputs[4]
 
@@ -1025,7 +1058,7 @@ class DetectionLayer(KE.Layer):
 
         # Run detection refinement graph on each item in the batch
         detections_batch = utils.batch_slice(
-            [rois, mrcnn_class, mrcnn_material, mrcnn_bbox, window],
+            [rois, mrcnn_class, mrcnn_component, mrcnn_bbox, window],
             lambda v, x, y, w, z: refine_detections_graph(v, x, y, w, z, self.config),
             self.config.IMAGES_PER_GPU)
 
@@ -1114,11 +1147,11 @@ def build_rpn_model(anchor_stride, anchors_per_location, depth):
 
 
 ############################################################
-#  Feature Pyramid Network Heads（多任务的分支 包含类别、box、mask三个多任务）
+#  Feature Pyramid Network Heads
 ############################################################
 
 def fpn_classifier_graph(rois, feature_maps, image_meta,
-                         pool_size, num_classes, num_materials,
+                         pool_size, num_classes, num_components,
                          train_bn=True, fc_layers_size=1024):
     """Builds the computation graph of the feature pyramid network classifier
     and regressor heads.
@@ -1139,16 +1172,6 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
         bbox_deltas: [batch, num_rois, NUM_CLASSES, (dy, dx, log(dh), log(dw))] Deltas to apply to
                      proposal boxes
     """
-    '''              =>Conv ==> Conv ==> Fc -> component
-     _________      /
-    |  |  |   |  ===                     ==>Fc -> BOX
-    |__|__|___|     \                   /
-                     =>Conv ==> Conv ==> 
-                                        \ 
-                                         ==>Fc -> class
-    '''
-
-
     # ROI Pooling
     # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
     x = PyramidROIAlign([pool_size, pool_size],
@@ -1157,15 +1180,15 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
     # PyramidROIAlign的结果走两条支路（可以认为它的结果是共享特征），一条支路是计算material分类
     # Two 1024 FC layers (implemented with Conv2D for consistency) for material
     y = KL.TimeDistributed(KL.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
-                           name="mrcnn_material_conv1")(x)
-    y = KL.TimeDistributed(BatchNorm(), name='mrcnn_material_bn1')(y, training=train_bn)
+                           name="mrcnn_component_conv1")(x)
+    y = KL.TimeDistributed(BatchNorm(), name='mrcnn_component_bn1')(y, training=train_bn)
     y = KL.Activation('relu')(y)
     y = KL.TimeDistributed(KL.Conv2D(fc_layers_size, (1, 1)),
-                           name="mrcnn_materials_conv2")(y)
-    y = KL.TimeDistributed(BatchNorm(), name='mrcnn_material_bn2')(y, training=train_bn)
+                           name="mrcnn_component_conv2")(y)
+    y = KL.TimeDistributed(BatchNorm(), name='mrcnn_component_bn2')(y, training=train_bn)
     y = KL.Activation('relu')(y)
     y = KL.Lambda(lambda x: K.squeeze(K.squeeze(x, 3), 2),
-                  name="pool_squeeze_material")(y)
+                  name="pool_squeeze_component")(y)
 
     # 第二条支路，计算class分类，注意到shared这个变量，意味着作者在这里使用了一个多任务的思路
     # 计算出共享特征shared后，走两条支路，分别用做class的计算（分类）和bbox的计算（回归）
@@ -1187,11 +1210,11 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
     mrcnn_probs = KL.TimeDistributed(KL.Activation("softmax"),
                                      name="mrcnn_class")(mrcnn_class_logits)
 
-    mrcnn_material_logits = KL.TimeDistributed(KL.Dense(num_materials),
-                                               name='mrcnn_material_logits')(y)
+    mrcnn_component_logits = KL.TimeDistributed(KL.Dense(num_components),
+                                               name='mrcnn_component_logits')(y)
     
-    mrcnn_probs_material = KL.TimeDistributed(KL.Activation("softmax"),
-                                              name="mrcnn_material")(mrcnn_material_logits)
+    mrcnn_probs_component = KL.TimeDistributed(KL.Activation("softmax"),
+                                              name="mrcnn_component")(mrcnn_component_logits)
 
     # BBox head
     # [batch, num_rois, NUM_CLASSES * (dy, dx, log(dh), log(dw))]
@@ -1201,7 +1224,7 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
     s = K.int_shape(x)
     mrcnn_bbox = KL.Reshape((s[1], num_classes, 4), name="mrcnn_bbox")(x)
 
-    return mrcnn_class_logits, mrcnn_material_logits, mrcnn_probs, mrcnn_probs_material, mrcnn_bbox
+    return mrcnn_class_logits, mrcnn_component_logits, mrcnn_probs, mrcnn_probs_component, mrcnn_bbox
 
 
 def build_fpn_mask_graph(rois, feature_maps, image_meta,
@@ -1383,6 +1406,32 @@ def mrcnn_material_loss_graph(target_material_ids, pred_material_logits,active_m
     loss = tf.reduce_sum(loss) / tf.reduce_sum(pred_active)
     return loss
 
+
+#添加零件分支的loss
+def mrcnn_component_loss_graph(target_component_ids, pred_component_logits, active_component_ids):
+    """Loss for the classifier head of Mask RCNN.
+
+    target_class_ids: [batch, num_rois]. Integer class IDs. Uses zero
+        padding to fill in the array.
+    pred_class_logits: [batch, num_rois, num_classes]
+    active_class_ids: [batch, num_classes]. Has a value of 1 for
+        classes that are in the dataset of the image, and 0
+        for classes that are not in the dataset.
+    """
+    # During model building, Keras calls this function with
+    # target_class_ids of type float32. Unclear why. Cast it
+    # to int to get around it.
+    target_component_ids = tf.cast(target_component_ids, 'int64')
+
+    # Loss
+    pred_component_ids = tf.argmax(pred_component_logits, axis=2)
+    pred_active = tf.gather(active_component_ids[0], pred_component_ids)
+    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        labels=target_component_ids, logits=pred_component_logits)
+    loss = loss * pred_active
+    loss = tf.reduce_sum(loss) / tf.reduce_sum(pred_active)
+    return loss
+
 def mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox):
     """Loss for Mask R-CNN bounding box refinement.
 
@@ -1482,7 +1531,8 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
     """
     # Load image and mask
     image = dataset.load_image(image_id)
-    mask, class_ids, material_ids = dataset.load_mask(image_id)
+    # mask, class_ids, material_ids = dataset.load_mask(image_id)
+    mask, class_ids, component_ids = dataset.load_mask(image_id)
     original_shape = image.shape
     image, window, scale, padding, crop = utils.resize_image(
         image,
@@ -1536,7 +1586,10 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
     _idx = np.sum(mask, axis=(0, 1)) > 0
     mask = mask[:, :, _idx]
     class_ids = class_ids[_idx]
-    material_ids = material_ids[_idx]
+    # material_ids = material_ids[_idx]
+
+    component_ids = component_ids[_idx]
+
     # Bounding boxes. Note that some boxes might be all zeros
     # if the corresponding mask got cropped out.
     # bbox: [num_instances, (y1, x1, y2, x2)]
@@ -1549,9 +1602,14 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
     source_class_ids = dataset.source_class_ids[dataset.image_info[image_id]["source"]]
     active_class_ids[source_class_ids] = 1
 
-    active_material_ids = np.zeros([dataset.num_materials], dtype=np.int32)
-    source_material_ids = dataset.source_material_ids[dataset.image_info[image_id]["source"]]
-    active_material_ids[source_material_ids] = 1
+    # active_material_ids = np.zeros([dataset.num_materials], dtype=np.int32)
+    # source_material_ids = dataset.source_material_ids[dataset.image_info[image_id]["source"]]
+    # active_material_ids[source_material_ids] = 1
+    # 添加零件类别
+    active_component_ids = np.zeros([dataset.num_components], dtype=np.int32)
+    source_component_ids = dataset.source_component_ids[dataset.image_info[image_id]["source"]]
+    active_component_ids[source_component_ids] = 1
+
 
 
     # Resize masks to smaller size to reduce memory usage
@@ -1559,13 +1617,16 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
         mask = utils.minimize_mask(bbox, mask, config.MINI_MASK_SHAPE)
 
     # Image meta data
+    # image_meta = compose_image_meta(image_id, original_shape, image.shape,
+    #                                 window, scale, active_class_ids, active_material_ids)
+    # 修改为零件类别
     image_meta = compose_image_meta(image_id, original_shape, image.shape,
-                                    window, scale, active_class_ids, active_material_ids)
+                                    window, scale, active_class_ids, active_component_ids)
 
-    return image, image_meta, class_ids, material_ids, bbox, mask
+    return image, image_meta, class_ids, component_ids, bbox, mask
 
 
-def build_detection_targets(rpn_rois, gt_class_ids, gt_material_ids, gt_boxes, gt_masks, config):
+def build_detection_targets(rpn_rois, gt_class_ids, gt_component_ids, gt_boxes, gt_masks, config):
     """Generate targets for training Stage 2 classifier and mask heads.
     This is not used in normal training. It's useful for debugging or to train
     the Mask RCNN heads without using the RPN head.
@@ -1600,7 +1661,9 @@ def build_detection_targets(rpn_rois, gt_class_ids, gt_material_ids, gt_boxes, g
     instance_ids = np.where(gt_class_ids > 0)[0]
     assert instance_ids.shape[0] > 0, "Image must contain instances."
     gt_class_ids = gt_class_ids[instance_ids]
-    gt_material_ids = gt_material_ids[instance_ids]
+
+    gt_component_ids = gt_component_ids[instance_ids]
+
     gt_boxes = gt_boxes[instance_ids]
     gt_masks = gt_masks[:, :, instance_ids]
 
@@ -1833,7 +1896,7 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
     return rpn_match, rpn_bbox
 
 
-def generate_random_rois(image_shape, count, gt_class_ids, gt_material_ids, gt_boxes):
+def generate_random_rois(image_shape, count, gt_class_ids, gt_component_ids, gt_boxes):
     """Generates ROI proposals similar to what a region proposal network
     would generate.
 
@@ -1907,6 +1970,7 @@ def generate_random_rois(image_shape, count, gt_class_ids, gt_material_ids, gt_b
     return rois
 
 
+# 数据的生成器
 def data_generator(dataset, config, shuffle=True, augment=False, augmentation=None,
                    random_rois=0, batch_size=1, detection_targets=False,
                    no_augmentation_sources=None):
@@ -1975,18 +2039,34 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
 
             # Get GT bounding boxes and masks for image.
             image_id = image_ids[image_index]
+            '''
+            image shape is:[height, width, 3]
+            image_meta shape is:[51]
+            gt_class_ids shape is:[instance_count]
+            gt_component_ids shape is:[instance_count]
+            gt_boxes shape is:[instance_count, (y1, x1, y2, x2)]
+            gt_mask shape is:[height, width, instance_count]
+            '''
 
             # If the image source is not to be augmented pass None as augmentation
             if dataset.image_info[image_id]['source'] in no_augmentation_sources:
-                image, image_meta, gt_class_ids, gt_material_ids, gt_boxes, gt_masks = \
+                image, image_meta, gt_class_ids, gt_component_ids, gt_boxes, gt_masks = \
                     load_image_gt(dataset, config, image_id, augment=augment,
                                   augmentation=None,
                                   use_mini_mask=config.USE_MINI_MASK)
             else:
-                image, image_meta, gt_class_ids, gt_material_ids, gt_boxes, gt_masks = \
+                image, image_meta, gt_class_ids, gt_component_ids, gt_boxes, gt_masks = \
                     load_image_gt(dataset, config, image_id, augment=augment,
                                 augmentation=augmentation,
                                 use_mini_mask=config.USE_MINI_MASK)
+
+            # print("image shape is:", np.array(image).shape)
+            # print("image_meta shape is:", np.array(image_meta).shape)
+            # print("gt_class_ids shape is:", np.array(gt_class_ids).shape)
+            # print("gt_component_ids shape is:", np.array(gt_component_ids).shape)
+            # print("gt_boxes shape is:", np.array(gt_boxes).shape)
+            # print("gt_mask shape is:", np.array(gt_masks).shape)
+
 
             # Skip images that have no instances. This can happen in cases
             # where we train on a subset of classes and the image doesn't
@@ -2001,12 +2081,12 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
             # Mask R-CNN Targets
             if random_rois:
                 rpn_rois = generate_random_rois(
-                    image.shape, random_rois, gt_class_ids, gt_material_ids, gt_boxes)
+                    image.shape, random_rois, gt_class_ids, gt_component_ids, gt_boxes)
                 if detection_targets:
                     # 可以先不管
-                    rois, mrcnn_class_ids, mrcnn_material_ids, mrcnn_bbox, mrcnn_mask =\
+                    rois, mrcnn_class_ids, mrcnn_component_ids, mrcnn_bbox, mrcnn_mask =\
                         build_detection_targets(
-                            rpn_rois, gt_class_ids, gt_material_ids,
+                            rpn_rois, gt_class_ids, gt_component_ids,
                             gt_boxes, gt_masks, config)
 
             # Init batch arrays
@@ -2021,9 +2101,14 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
                     (batch_size,) + image.shape, dtype=np.float32)
                 batch_gt_class_ids = np.zeros(
                     (batch_size, config.MAX_GT_INSTANCES), dtype=np.int32)
-                # 依葫芦画瓢，增加material分类
-                batch_gt_material_ids = np.zeros(
+                # # 依葫芦画瓢，增加material分类
+                # batch_gt_material_ids = np.zeros(
+                #     (batch_size, config.MAX_GT_INSTANCES), dtype=np.int32)
+
+                #添加零件分类
+                batch_gt_component_ids = np.zeros(
                     (batch_size, config.MAX_GT_INSTANCES), dtype=np.int32)
+
                 batch_gt_boxes = np.zeros(
                     (batch_size, config.MAX_GT_INSTANCES, 4), dtype=np.int32)
                 batch_gt_masks = np.zeros(
@@ -2049,7 +2134,10 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
                     np.arange(gt_boxes.shape[0]), config.MAX_GT_INSTANCES, replace=False)
                 gt_class_ids = gt_class_ids[ids]
                 # 依葫芦画瓢，增加material分类
-                gt_material_ids = gt_material_ids[ids]
+                # gt_material_ids = gt_material_ids[ids]
+                #添加零件分类
+                gt_component_ids = gt_component_ids[ids]
+
                 gt_boxes = gt_boxes[ids]
                 gt_masks = gt_masks[:, :, ids]
 
@@ -2060,7 +2148,10 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
             batch_images[b] = mold_image(image.astype(np.float32), config)
             batch_gt_class_ids[b, :gt_class_ids.shape[0]] = gt_class_ids
             # 依葫芦画瓢，增加material分类
-            batch_gt_material_ids[b, :gt_material_ids.shape[0]] = gt_material_ids
+            # batch_gt_material_ids[b, :gt_material_ids.shape[0]] = gt_material_ids
+            #添加零件分类
+            batch_gt_component_ids[b, :gt_component_ids.shape[0]] = gt_component_ids
+
             batch_gt_boxes[b, :gt_boxes.shape[0]] = gt_boxes
             batch_gt_masks[b, :, :, :gt_masks.shape[-1]] = gt_masks
             if random_rois:
@@ -2076,8 +2167,12 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
             # Batch full?
             if b >= batch_size:
                 # 依葫芦画瓢，增加material分类
+                # inputs = [batch_images, batch_image_meta, batch_rpn_match, batch_rpn_bbox,
+                #           batch_gt_class_ids, batch_gt_material_ids, batch_gt_boxes, batch_gt_masks]
+                # 添加零件分类
                 inputs = [batch_images, batch_image_meta, batch_rpn_match, batch_rpn_bbox,
-                          batch_gt_class_ids, batch_gt_material_ids, batch_gt_boxes, batch_gt_masks]
+                          batch_gt_class_ids, batch_gt_component_ids, batch_gt_boxes, batch_gt_masks]
+
                 outputs = []
 
                 if random_rois:
@@ -2161,9 +2256,15 @@ class MaskRCNN():
             # 1. GT Class IDs (zero padded)
             input_gt_class_ids = KL.Input(
                 shape=[None], name="input_gt_class_ids", dtype=tf.int32)
-            # 依葫芦画瓢，增加material分类
-            input_gt_material_ids = KL.Input(
-                shape=[None], name="input_gt_material_ids", dtype=tf.int32)
+            # # 依葫芦画瓢，增加material分类
+            # input_gt_material_ids = KL.Input(
+            #     shape=[None], name="input_gt_material_ids", dtype=tf.int32)
+
+            # 依葫芦画瓢，增加component分类
+            input_gt_component_ids = KL.Input(
+                shape=[None], name="input_gt_component_ids", dtype=tf.int32)
+
+
             # 2. GT Boxes in pixels (zero padded)
             # [batch, MAX_GT_INSTANCES, (y1, x1, y2, x2)] in image coordinates
             input_gt_boxes = KL.Input(
@@ -2268,9 +2369,15 @@ class MaskRCNN():
                 lambda x: parse_image_meta_graph(x)["active_class_ids"]
                 )(input_image_meta)
 
-            active_material_ids = KL.Lambda(
-                lambda x: parse_image_meta_graph(x)["active_material_ids"]
-                )(input_image_meta)
+            # active_material_ids = KL.Lambda(
+            #     lambda x: parse_image_meta_graph(x)["active_material_ids"]
+            #     )(input_image_meta)
+
+            #添加零件分支
+            active_component_ids = KL.Lambda(
+                lambda x: parse_image_meta_graph(x)["active_component_ids"]
+            )(input_image_meta)
+
 
             if not config.USE_RPN_ROIS:
                 # Ignore predicted ROIs and use ROIs provided as an input.
@@ -2290,9 +2397,13 @@ class MaskRCNN():
             # 虽然第一个已经计算了target_mask和第二个重复了，但是如果只要第一个，计算出的target_mask尺寸是错的
             # 妥善起见，就这么写了
             # 07.11补充：已修正代码，只需要一个就够了，具体看DetectionTargetLayer_mat的compute mask
-            rois, target_class_ids, target_material_ids, target_bbox, target_mask = \
+            # rois, target_class_ids, target_material_ids, target_bbox, target_mask = \
+            #     DetectionTargetLayer_mat(config, name="proposal_targets_mat")([
+            #         target_rois, input_gt_class_ids, input_gt_material_ids, gt_boxes, input_gt_masks])
+
+            rois, target_class_ids, target_component_ids, target_bbox, target_mask = \
                 DetectionTargetLayer_mat(config, name="proposal_targets_mat")([
-                    target_rois, input_gt_class_ids, input_gt_material_ids, gt_boxes, input_gt_masks])
+                    target_rois, input_gt_class_ids, input_gt_component_ids, gt_boxes, input_gt_masks])
 
             # _, _, _, target_mask = \
             #     DetectionTargetLayer(config, name="proposal_targets")([
@@ -2301,10 +2412,17 @@ class MaskRCNN():
             # Network Heads
             # TODO: verify that this handles zero padded ROIs
             # 依葫芦画瓢，增加material分类
-            mrcnn_class_logits, mrcnn_material_logits, \
-            mrcnn_class, mrcnn_material, mrcnn_bbox =\
+            # mrcnn_class_logits, mrcnn_material_logits, \
+            # mrcnn_class, mrcnn_material, mrcnn_bbox =\
+            #     fpn_classifier_graph(rois, mrcnn_feature_maps, input_image_meta,
+            #                          config.POOL_SIZE, config.NUM_CLASSES, config.NUM_COMPONENT,
+            #                          train_bn=config.TRAIN_BN,
+            #                          fc_layers_size=config.FPN_CLASSIF_FC_LAYERS_SIZE)
+
+            mrcnn_class_logits, mrcnn_component_logits, \
+            mrcnn_class, mrcnn_component, mrcnn_bbox = \
                 fpn_classifier_graph(rois, mrcnn_feature_maps, input_image_meta,
-                                     config.POOL_SIZE, config.NUM_CLASSES, config.NUM_MATERIALS,
+                                     config.POOL_SIZE, config.NUM_CLASSES, config.NUM_COMPONENTS,
                                      train_bn=config.TRAIN_BN,
                                      fc_layers_size=config.FPN_CLASSIF_FC_LAYERS_SIZE)
 
@@ -2325,8 +2443,12 @@ class MaskRCNN():
             class_loss = KL.Lambda(lambda x: mrcnn_class_loss_graph(*x), name="mrcnn_class_loss")(
                 [target_class_ids, mrcnn_class_logits, active_class_ids])
             # 依葫芦画瓢，增加material分类
-            material_loss = KL.Lambda(lambda x: mrcnn_material_loss_graph(*x), name="mrcnn_material_loss")(
-                [target_material_ids, mrcnn_material_logits, active_material_ids])
+            # material_loss = KL.Lambda(lambda x: mrcnn_material_loss_graph(*x), name="mrcnn_material_loss")(
+            #     [target_material_ids, mrcnn_material_logits, active_material_ids])
+
+            component_loss = KL.Lambda(lambda x: mrcnn_component_loss_graph(*x), name="mrcnn_component_loss")(
+                [target_component_ids, mrcnn_component_logits, active_component_ids])
+
             bbox_loss = KL.Lambda(lambda x: mrcnn_bbox_loss_graph(*x), name="mrcnn_bbox_loss")(
                 [target_bbox, target_class_ids, mrcnn_bbox])
             mask_loss = KL.Lambda(lambda x: mrcnn_mask_loss_graph(*x), name="mrcnn_mask_loss")(
@@ -2334,25 +2456,44 @@ class MaskRCNN():
 
             # Model
             # 材料多分类需要修改输入和输出
+            # inputs = [input_image, input_image_meta,
+            #           input_rpn_match, input_rpn_bbox,
+            #           input_gt_class_ids, input_gt_material_ids,
+            #           input_gt_boxes, input_gt_masks]
+            # if not config.USE_RPN_ROIS:
+            #     inputs.append(input_rois)
+            # outputs = [rpn_class_logits, rpn_class, rpn_bbox,
+            #            mrcnn_class_logits, mrcnn_class, mrcnn_bbox, mrcnn_mask,
+            #            rpn_rois, output_rois,
+            #            rpn_class_loss, rpn_bbox_loss, class_loss, material_loss, bbox_loss, mask_loss]
+
             inputs = [input_image, input_image_meta,
                       input_rpn_match, input_rpn_bbox,
-                      input_gt_class_ids, input_gt_material_ids,
+                      input_gt_class_ids, input_gt_component_ids,
                       input_gt_boxes, input_gt_masks]
             if not config.USE_RPN_ROIS:
                 inputs.append(input_rois)
             outputs = [rpn_class_logits, rpn_class, rpn_bbox,
                        mrcnn_class_logits, mrcnn_class, mrcnn_bbox, mrcnn_mask,
                        rpn_rois, output_rois,
-                       rpn_class_loss, rpn_bbox_loss, class_loss, material_loss, bbox_loss, mask_loss]
+                       rpn_class_loss, rpn_bbox_loss, class_loss, component_loss, bbox_loss, mask_loss]
+
             model = KM.Model(inputs, outputs, name='mask_rcnn')
         else:
             # Network Heads
             # Proposal classifier and BBox regressor heads
             # 依葫芦画瓢，增加material分类
-            mrcnn_class_logits, mrcnn_material_logits, \
-            mrcnn_class, mrcnn_material, mrcnn_bbox = \
+            # mrcnn_class_logits, mrcnn_material_logits, \
+            # mrcnn_class, mrcnn_material, mrcnn_bbox = \
+            #     fpn_classifier_graph(rpn_rois, mrcnn_feature_maps, input_image_meta,
+            #                          config.POOL_SIZE, config.NUM_CLASSES, config.NUM_MATERIALS,
+            #                          train_bn=config.TRAIN_BN,
+            #                          fc_layers_size=config.FPN_CLASSIF_FC_LAYERS_SIZE)
+
+            mrcnn_class_logits, mrcnn_component_logits, \
+            mrcnn_class, mrcnn_component, mrcnn_bbox = \
                 fpn_classifier_graph(rpn_rois, mrcnn_feature_maps, input_image_meta,
-                                     config.POOL_SIZE, config.NUM_CLASSES, config.NUM_MATERIALS,
+                                     config.POOL_SIZE, config.NUM_CLASSES, config.NUM_COMPONENTS,
                                      train_bn=config.TRAIN_BN,
                                      fc_layers_size=config.FPN_CLASSIF_FC_LAYERS_SIZE)
 
@@ -2360,8 +2501,11 @@ class MaskRCNN():
             # output is [batch, num_detections, (y1, x1, y2, x2, class_id, score)] in
             # normalized coordinates
             # 依葫芦画瓢，增加material分类
+            # detections = DetectionLayer(config, name="mrcnn_detection")(
+            #     [rpn_rois, mrcnn_class, mrcnn_material, mrcnn_bbox, input_image_meta])
+
             detections = DetectionLayer(config, name="mrcnn_detection")(
-                [rpn_rois, mrcnn_class, mrcnn_material, mrcnn_bbox, input_image_meta])
+                [rpn_rois, mrcnn_class, mrcnn_component, mrcnn_bbox, input_image_meta])
 
             # Create masks for detections
             detection_boxes = KL.Lambda(lambda x: x[..., :4])(detections)
@@ -2372,9 +2516,14 @@ class MaskRCNN():
                                               train_bn=config.TRAIN_BN)
 
             # 材料多分类需要修改输入输出
+            # model = KM.Model([input_image, input_image_meta, input_anchors],
+            #                  [detections, mrcnn_class, mrcnn_material, mrcnn_bbox,
+            #                      mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
+            #                  name='mask_rcnn')
+
             model = KM.Model([input_image, input_image_meta, input_anchors],
-                             [detections, mrcnn_class, mrcnn_material, mrcnn_bbox,
-                                 mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
+                             [detections, mrcnn_class, mrcnn_component, mrcnn_bbox,
+                              mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
                              name='mask_rcnn')
             # print(model.summary())
 
@@ -2486,7 +2635,7 @@ class MaskRCNN():
         self.keras_model._per_input_losses = {}
         loss_names = [
             "rpn_class_loss",  "rpn_bbox_loss",
-            "mrcnn_class_loss", "mrcnn_material_loss",
+            "mrcnn_class_loss", "mrcnn_component_loss",
             "mrcnn_bbox_loss", "mrcnn_mask_loss"]
         for name in loss_names:
             layer = self.keras_model.get_layer(name)
@@ -2596,6 +2745,7 @@ class MaskRCNN():
         self.checkpoint_path = self.checkpoint_path.replace(
             "*epoch*", "{epoch:04d}")
 
+    # 训练
     def train(self, train_dataset, val_dataset, learning_rate, epochs, layers,
               augmentation=None, custom_callbacks=None, no_augmentation_sources=None):
         """Train the model.
@@ -2636,8 +2786,8 @@ class MaskRCNN():
         layer_regex = {
             # all layers but the backbone
             "heads": r"(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
-            "material-classifiers": r"(mrcnn_material\_.*)",
-            "heads-no-material": r"(mrcnn_class\_.*)|(mrcnn_bbox\_.*)|(rpn\_.*)|(fpn\_.*)",
+            "component-classifiers": r"(mrcnn_component\_.*)",
+            "heads-no-component": r"(mrcnn_class\_.*)|(mrcnn_bbox\_.*)|(rpn\_.*)|(fpn\_.*)",
             "temp": r"(mrcnn\_.*)",
             # From a specific Resnet stage and up
             "3+": r"(res3.*)|(bn3.*)|(res4.*)|(bn4.*)|(res5.*)|(bn5.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
@@ -2654,8 +2804,12 @@ class MaskRCNN():
                                          augmentation=augmentation,
                                          batch_size=self.config.BATCH_SIZE,
                                          no_augmentation_sources=no_augmentation_sources)
+        print("train_generator over")
+
         val_generator = data_generator(val_dataset, self.config, shuffle=True,
                                        batch_size=self.config.BATCH_SIZE)
+
+        print("val_generator over")
 
         # Create log_dir if it does not exist
         if not os.path.exists(self.log_dir):
@@ -2666,7 +2820,7 @@ class MaskRCNN():
             keras.callbacks.TensorBoard(log_dir=self.log_dir,
                                         histogram_freq=0, write_graph=True, write_images=False),
             keras.callbacks.ModelCheckpoint(self.checkpoint_path,
-                                            verbose=0, save_weights_only=True),
+                                            verbose=0, save_weights_only=True, period=1),
         ]
 
         # Add custom callbacks to the list
@@ -2686,6 +2840,11 @@ class MaskRCNN():
             workers = 0
         else:
             workers = 16 # multiprocessing.cpu_count()
+
+        print("prepare into keras_model_fit_generator")
+        print("epochs:", epochs)
+        print("initial_epoch:", self.epoch)
+
 
         # print(self.keras_model.summary())
         self.keras_model.fit_generator(
@@ -2732,7 +2891,7 @@ class MaskRCNN():
             image_meta = compose_image_meta(
                 0, image.shape, molded_image.shape, window, scale,
                 np.zeros([self.config.NUM_CLASSES], dtype=np.int32),
-                np.zeros([self.config.NUM_MATERIALS],dtype=np.int32))
+                np.zeros([self.config.NUM_COMPONENTS], dtype=np.int32))
             # Append
             molded_images.append(molded_image)
             windows.append(window)
@@ -2771,8 +2930,13 @@ class MaskRCNN():
         boxes = detections[:N, :4]
         class_ids = detections[:N, 4].astype(np.int32)
         scores = detections[:N, 5]
-        material_ids = detections[:N, 6].astype(np.int32)
-        scores_material = detections[:N, 7]
+
+        # material_ids = detections[:N, 6].astype(np.int32)
+        # scores_material = detections[:N, 7]
+        component_ids = detections[:N, 6].astype(np.int32)
+        scores_component = detections[:N, 7]
+
+
         masks = mrcnn_mask[np.arange(N), :, :, class_ids]
 
         # Translate normalized coordinates in the resized image to pixel
@@ -2796,8 +2960,10 @@ class MaskRCNN():
             boxes = np.delete(boxes, exclude_ix, axis=0)
             class_ids = np.delete(class_ids, exclude_ix, axis=0)
             scores = np.delete(scores, exclude_ix, axis=0)
-            material_ids = np.delete(material_ids, exclude_ix, axis=0)
-            scores_material = np.delete(scores_material, exclude_ix, axis=0)
+
+            component_ids = np.delete(component_ids, exclude_ix, axis=0)
+            scores_component = np.delete(scores_component, exclude_ix, axis=0)
+
             masks = np.delete(masks, exclude_ix, axis=0)
             N = class_ids.shape[0]
 
@@ -2810,8 +2976,9 @@ class MaskRCNN():
         full_masks = np.stack(full_masks, axis=-1)\
             if full_masks else np.empty(original_image_shape[:2] + (0,))
 
-        return boxes, class_ids, scores, material_ids, scores_material, full_masks
+        return boxes, class_ids, scores, component_ids, scores_component, full_masks
 
+    # 进行检测
     def detect(self, images, verbose=0):
         """Runs the detection pipeline.
 
@@ -2861,7 +3028,7 @@ class MaskRCNN():
         results = []
         for i, image in enumerate(images):
             final_rois, final_class_ids, final_scores, \
-            final_material_ids, final_scores_material, final_masks =\
+            final_component_ids, final_scores_component, final_masks =\
                 self.unmold_detections(detections[i], mrcnn_mask[i],
                                        image.shape, molded_images[i].shape,
                                        windows[i])
@@ -2869,8 +3036,8 @@ class MaskRCNN():
                 "rois": final_rois,
                 "class_ids": final_class_ids,
                 "scores": final_scores,
-                "material_ids": final_material_ids,
-                "scores_materials": final_scores_material,
+                "component_ids": final_component_ids,
+                "scores_components": final_scores_component,
                 "masks": final_masks,
             })
         return results
@@ -3057,11 +3224,11 @@ class MaskRCNN():
 
 
 ############################################################
-#  Data Formatting
+#  Data Formatting   （数据的格式化）
 ############################################################
-
+# 整合图片信息
 def compose_image_meta(image_id, original_image_shape, image_shape,
-                       window, scale, active_class_ids, active_material_ids):
+                       window, scale, active_class_ids, active_component_ids):
     """Takes attributes of an image and puts them in one 1D array.
 
     image_id: An int ID of the image. Useful for debugging.
@@ -3081,7 +3248,7 @@ def compose_image_meta(image_id, original_image_shape, image_shape,
         list(window) +                # size=4 (y1, x1, y2, x2) in image cooredinates
         [scale] +                     # size=1
         list(active_class_ids) +        # size=num_classes
-        list(active_material_ids)
+        list(active_component_ids)
     )
     return meta
 
@@ -3109,7 +3276,7 @@ def parse_image_meta(meta):
         "active_class_ids": active_class_ids.astype(np.int32),
     }
 
-
+# 解析图片的信息
 def parse_image_meta_graph(meta):
     """Parses a tensor that contains image attributes to its components.
     See compose_image_meta() for more details.
@@ -3123,9 +3290,9 @@ def parse_image_meta_graph(meta):
     image_shape = meta[:, 4:7]
     window = meta[:, 7:11]  # (y1, x1, y2, x2) window of image in in pixels
     scale = meta[:, 11]
-    # active_class_ids = meta[:, 12:]
-    active_class_ids = meta[:, 12:17]
-    active_material_ids = meta[:, 17:]
+    # active_class_ids = meta[:, 12:]   之前只有5个类别
+    active_class_ids = meta[:, 12:18]   # 现在是6个类别（包含背景）
+    active_component_ids = meta[:, 18:]
     return {
         "image_id": image_id,
         "original_image_shape": original_image_shape,
@@ -3133,7 +3300,7 @@ def parse_image_meta_graph(meta):
         "window": window,
         "scale": scale,
         "active_class_ids": active_class_ids,
-        "active_material_ids": active_material_ids,
+        "active_component_ids": active_component_ids,
     }
 
 

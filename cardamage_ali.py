@@ -95,7 +95,7 @@ class CarDamageConfig(Config):
     to the COCO dataset.
     """
     # Give the configuration a recognizable name
-    NAME = "Cardamage_baidu"
+    NAME = "Cardamage_ali"
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
@@ -109,9 +109,9 @@ class CarDamageConfig(Config):
     # NUM_CLASSES = 1 + 8  # 只需要餐具的种类数即可，不需要材料的种类?
     # NUM_MATERIALS = 1 + 5
     NUM_CLASSES = 1 + 4
-    NUM_COMPONENTS = 1 + 13
+    NUM_COMPONENTS = 1 + 6
 
-    BACKBONE = "resnet101"
+    BACKBONE = "resnet50"
 
     # IMAGE_MIN_DIM = IMAGE_MAX_DIM = 128
 
@@ -377,8 +377,8 @@ def train(model):
                 layers='4+')
     print("Stage2 Over")
     # 在训练好原有任务后，开始训练material的分类，此时需要建立一个新的config
-    # 该config继承了MediaConfig类，并将各个损失的权重做了调�?
-    # 此时loss会明显上升，毕竟考虑了一个额外的material_loss，让他正常训练就可以�?
+    # 该config继承了MediaConfig类，并将各个损失的权重做了调?
+    # 此时loss会明显上升，毕竟考虑了一个额外的material_loss，让他正常训练就可以?
     class ComponentConfig(CarDamageConfig):
         LOSS_WEIGHTS = {
             "rpn_class_loss": 1.,
@@ -470,12 +470,12 @@ def mask_to_seg(mask):
 def save_to_json(imageHeight, imageWidth, boxes, masks, class_ids, component_ids,
                  save_name, save_dir):
     class_names = ['__background', 'scratch', 'indentation', 'crack', 'perforation']
-    component_names = ['__background', 'front bumper', 'rear bumper', 'front fender',
-                       'rear fender', 'door', 'rear taillight', 'headlight',
-                       'hood', 'luggage cover', 'radiator grille', 'bottom side',
-                       'rearview mirror', 'license plate']
+    # component_names = ['__background', 'front bumper', 'rear bumper', 'front fender',
+    #                    'rear fender', 'door', 'rear taillight', 'headlight',
+    #                    'hood', 'luggage cover', 'radiator grille', 'bottom side',
+    #                    'rearview mirror', 'license plate']
 
-    # component_names = ['__background', "bumper", "fender", "light", "rearview", "windshield", "others"]
+    component_names = ['__background', "bumper", "fender", "light", "rearview", "windshield", "others"]
 
     N = boxes.shape[0]
     bbox = []
