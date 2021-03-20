@@ -102,7 +102,7 @@ class CarDamageConfig(Config):
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
     # self.IMAGES_PER_GPU * self.GPU_COUNT
-    IMAGES_PER_GPU = 1
+    IMAGES_PER_GPU = 2
 
     # Uncomment to train on 8 GPUs (default is 1)
     GPU_COUNT = 1
@@ -389,12 +389,16 @@ def train(model):
                    ]),
     ], random_order=True)
 
-    model.train(dataset_train, dataset_val,
-                learning_rate=config.LEARNING_RATE,
-                epochs=4,
-                layers='heads-no-component',
-                augmentation=augmentation)
+    # model.train(dataset_train, dataset_val,
+    #             learning_rate=config.LEARNING_RATE,
+    #             epochs=4,
+    #             layers='heads-no-component',
+    #             augmentation=augmentation)
     print("Stage1 Over")
+
+    model.load_weights(
+        "/home/pengjinbo/kingpopen/Car/With_component/logs/cardamage_ali20210312T1920/mask_rcnn_cardamage_ali_0006.h5")
+
     # Training - Stage 2
     # Finetune layers from ResNet stage 4 and up
     model.train(dataset_train, dataset_val,

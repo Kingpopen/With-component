@@ -9,14 +9,34 @@ import json
 from pycocotools import mask as maskUtils
 import imgaug as ia
 import imgaug.augmenters as iaa
+import cv2
 from imgaug.augmentables.segmaps import SegmentationMapsOnImage
 import imageio
-
+import skimage
+import math
 
 
 DEFAULT_DATASET_YEAR = "2017"
 config = Config()
 ia.seed(2)
+
+label_value_to_name = { 1:"front bumper", 2:"rear bumper",
+            3:"front bumper grille", 4:"front windshield",
+            5:"rear windshield", 6:"front tire",
+            7:"rear tire", 8:"front side glass",
+            9:"rear side glass", 10:"front fender",
+            11:"rear fender", 12:"front mudguard",
+            13:"rear mudguard", 14:"turn signal",
+            15:"front door", 16:"rear door",
+            17:"rear outer taillight", 18:"rear inner taillight",
+            19:"headlight", 20:"fog light",
+            21:"hood", 22:"luggage cover",
+            23:"roof", 24:"steel ring",
+            25:"radiator grille", 26:"a pillar",
+            27:"b pillar", 28:"c pillar",
+            29:"d pillar", 30:"bottom side",
+            31:"rearview mirror", 32:"license plate"}
+
 
 class CarDamageDataset(utils.Dataset):
 
@@ -46,7 +66,7 @@ class CarDamageDataset(utils.Dataset):
         if not component_ids:
             component_ids = sorted(coco.getCompIds())
 
-        # All images or a subset? 
+        # All images or a subset?
         if component_ids:
             image_ids = []
             for id in component_ids:
@@ -76,8 +96,6 @@ class CarDamageDataset(utils.Dataset):
                     imgIds=[i], catIds=class_ids, compIds=component_ids, iscrowd=None)))
         if return_coco:
             return coco
-
-
 
     def add_component(self, source, component_id, component_name):
         assert "." not in source, "Source name cannot contain a dot"
@@ -194,140 +212,202 @@ class CarDamageDataset(utils.Dataset):
         return m
 
 
-def augmentation_demo(image_id, augmentation):
-    dataset = CarDamageDataset()
-    coco = dataset.load_cardamage('/home/pengjinbo/kingpopen/Car/dataset2/unified_test/', 'unified_test', '2017',
-                                       return_coco=True)
-    dataset.prepare()
 
-    # Load image and mask
-    image = dataset.load_image(image_id)
-    # mask, class_ids, material_ids = dataset.load_mask(image_id)
-    mask, class_ids, component_ids = dataset.load_mask(image_id)
-    original_shape = image.shape
-    image, window, scale, padding, crop = utils.resize_image(
-        image,
-        min_dim=config.IMAGE_MIN_DIM,
-        min_scale=config.IMAGE_MIN_SCALE,
-        max_dim=config.IMAGE_MAX_DIM,
-        mode=config.IMAGE_RESIZE_MODE)
-    mask = utils.resize_mask(mask, scale, padding, crop)
+class AugmentationDataset():
+    def __init__(self, dataset_path, augmentation, image_id):
+        self.image_id = image_id
+        self.datset_path = dataset_path
+        self.dataset = CarDamageDataset()
+        self.dataset.load_cardamage(dataset_path, "train", year='2017')
+        self.dataset.prepare()
+        self.augmentation = augmentation
+        self.savedir = "/home/pengjinbo/kingpopen/Car/augmentation/"
 
-    # Augmentation
-    # This requires the imgaug lib (https://github.com/aleju/imgaug)
-    if augmentation:
-        import imgaug
+        self.mhd_e = 30
 
-        # Augmenters that are safe to apply to masks
-        # Some, such as Affine, have settings that make them unsafe, so always
-        # test your augmentation on masks
-        MASK_AUGMENTERS = ["Sequential", "SomeOf", "OneOf", "Sometimes",
-                           "Fliplr", "Flipud", "CropAndPad",
-                           "Affine", "PiecewiseAffine"]
 
-        def hook(images, augmenter, parents, default):
-            """Determines which augmenters to apply to masks."""
-            return augmenter.__class__.__name__ in MASK_AUGMENTERS
+    def build(self):
+        image = self.dataset.load_image(self.image_id)
+        mask, class_ids, component_ids = self.dataset.load_mask(self.image_id)
+        filename = self.dataset.source_image_link(image_id)[-19:]
+        print("filename:", filename)
 
-        segmap = SegmentationMapsOnImage(mask[:, :, 0], shape=image.shape)
         # Store shapes before augmentation to compare
         image_shape = image.shape
         mask_shape = mask.shape
-        print("the shape of mask_shape:", mask_shape)
 
-        image_augs = []
-        mask_augs = []
         # Make augmenters deterministic to apply similarly to images and masks
-        for _ in range(6):
-            det = augmentation.to_deterministic()
-
-            image_aug = det.augment_image(image)
-            # Change mask to np.uint8 because imgaug doesn't support np.bool
-            mask_aug = det.augment_image(mask.astype(np.uint8),
-                                        hooks=imgaug.HooksImages(activator=hook))
-
-            segmap_aug = SegmentationMapsOnImage(mask_aug[:, :, 0], shape=image_aug.shape)
-            image_augs.append(image_aug)
-            mask_augs.append(segmap_aug)
+        image, mask = self.img2aug_img(image, mask)
+        Height, Width, _ = image.shape
+        self.mask2json(image, mask, class_ids, component_ids, filename, Height, Width)
 
 
-        cells = []
-        for image_aug, segmap_aug in zip(image_augs, mask_augs):
-            cells.append(image)  # column 1
-            cells.append(segmap.draw_on_image(image)[0])  # column 2
-            cells.append(image_aug)  # column 3
-            cells.append(segmap_aug.draw_on_image(image_aug)[0])  # column 4
-            cells.append(segmap_aug.draw(size=image_aug.shape[:2])[0])  # column 5
-        # # Convert cells to a grid image and save.
-        grid_image = ia.draw_grid(cells, cols=5)
-        imageio.imwrite("./example_segmaps.jpg", grid_image)
+    # 进行数据增强
+    def img2aug_img(self, image, mask):
+        det = self.augmentation.to_deterministic()
+        image = det.augment_image(image)
+        # Change mask to np.uint8 because imgaug doesn't support np.bool
+        mask = det.augment_image(mask.astype(np.uint8))
+        print("the shape of mask:", mask.shape)
+        return image, mask
 
-        # # Augment images and segmaps.
-        # images_aug = []
-        # segmaps_aug = []
-        # for _ in range(10):
-        #     images_aug_i, segmaps_aug_i = seq(image=image, segmentation_maps=segmap)
-        #     images_aug.append(images_aug_i)
-        #     segmaps_aug.append(segmaps_aug_i)
-        # cells = []
-        # for image_aug, segmap_aug in zip(images_aug, segmaps_aug):
-        #     cells.append(image)  # column 1
-        #     cells.append(segmap.draw_on_image(image)[0])  # column 2
-        #     cells.append(image_aug)  # column 3
-        #     cells.append(segmap_aug.draw_on_image(image_aug)[0])  # column 4
-        #     cells.append(segmap_aug.draw(size=image_aug.shape[:2])[0])  # column 5
-        #
-        # # Convert cells to a grid image and save.
-        # grid_image = ia.draw_grid(cells, cols=5)
-        # imageio.imwrite("./example_segmaps.jpg", grid_image)
+    # 优化
+    def optimize(self, shapes):
+        # 先进行斜率处理
+        data = self.__xl(shapes)
+        # 再进行曼哈顿距离处理
+        data = self.__mhd(shapes)
+        return data
+
+    # 将获取的mask转化为json
+    def mask2json(self, image, mask, class_ids, component_ids, filename, imageHeight, imageWidth):
+        num = mask.shape[2]
+        print("class_ids:", class_ids)
+        print("component_ids:", component_ids)
+
+        shapes = []
+        for index in range(num):
+            instance = mask[:, :, index]
+            # origin label file don‘t consider the background， for example scratch is labeled as 0
+            category = class_ids[index] - 1
+            component = component_ids[index]
+
+            contours, hierarchy = cv2.findContours(instance, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            # print("contours:", contours)
+            print("the shape of contours:", np.array(contours).shape)
+            contour = contours[0]
+            points = []
+            contour = contour.reshape(-1, 2)
+            for list in contour:
+                point = []
+                point.append(float(list[0]))
+                point.append(float(list[1]))
+                points.append(point)
+
+            shape = {
+                "label": label_value_to_name[component],
+                "points": points,
+                "group_id": int(category),
+                "shape_type": "polygon",
+                "flags": {}
+            }
+            shapes.append(shape)
+
+        shapes = self.optimize(shapes)
+        self.__save(image, filename, shapes, imageHeight, imageWidth)
 
 
-        print("the shape of mask_aug is:", mask_aug.shape)
-        # print("mask[:,:,0]:", mask[:, :, 0])
-        # print("mask[:,:,1]:", mask[:, :, 1])
-        # print("the type of mask:", type(mask))
-        # print("class of mask[:,:,0]:", np.unique(mask[:, :, 0]))
-        # print("class of mask[:,:,1]", np.unique(mask[:, :, 1]))
+    # 保存
+    def __save(self, image, filename, shapes, imageHeight, imageWidth, imageData=None, otherData=None, flags=None,):
+        if otherData is None:
+            otherData = {}
+        if flags is None:
+            flags = {}
+        data = dict(
+            version="4.5.6",
+            flags=flags,
+            shapes=shapes,
+            imagePath="aug_" + filename,
+            imageData=imageData,
+            imageHeight=imageHeight,
+            imageWidth=imageWidth,
+        )
+        for key, value in otherData.items():
+            assert key not in data
+            data[key] = value
 
+        filename = filename[:-4]
+        json_save_name = os.path.join(self.savedir, "aug_" + filename + ".json")
+        image_save_name = os.path.join(self.savedir, "aug_" + filename + ".jpg")
 
-        # Verify that shapes didn't change
-        assert image.shape == image_shape, "Augmentation shouldn't change image size"
-        assert mask.shape == mask_shape, "Augmentation shouldn't change mask size"
-        # Change mask back to bool
-        # mask = mask.astype(np.bool)
+        with open(json_save_name, "w") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        skimage.io.imsave(image_save_name, image)
 
-# 线下数据增强
-class Augmentation_Offline():
-    def __init__(self):
-        pass
+    # 斜率
+    def __xl(self, shapes):
 
+        len_shape = len(shapes)
+        dirty = []
+        per = 0
+        for i in range(len_shape):
+            points = shapes[i]["points"]
+            len_point = len(points)
+            if len_point <= 15:
+                dirty.append(i)
+                continue
+            dx, dy = points[0][0] - points[1][0], points[0][1] - points[1][1]
+            tmp = []
+            for j in range(1, len_point):
+                dx1, dy1 = points[j][0] - points[(j + 1) % len_point][0], points[j][1] - points[(j + 1) % len_point][1]
+                if dx1 * dy != dy1 * dx:
+                    tmp.append(points[j])
+                dx, dy = dx1, dy1
+            if len(tmp) <= 15:
+                dirty.append(i)
+                continue
+            # print(len(tmp), len_point)
+            per += (len(tmp) / len_point)
+            shapes[i]["points"] = tmp
 
+        per /= (len_shape - len(dirty))
+        print("斜率处理后保留：", per * 100, "%%的点")
+        for i in range(len(dirty)):
+            del shapes[dirty[i] - i]
+        return shapes
+
+    # 曼哈顿距离
+    def __mhd(self, shapes):
+        len_shape = len(shapes)
+        dirty = []
+        per = 0
+        for i in range(len_shape):
+            points = shapes[i]["points"]
+            len_point = len(points)
+            # print("len_point:", len_point)
+
+            if len_point <= 5:
+                dirty.append(i)
+                continue
+
+            tmp = []
+            index = 0
+            for j in range(0, len_point):
+                dx1, dy1 = points[index][0] - points[(j + 1) % len_point][0], points[index][1] - \
+                           points[(j + 1) % len_point][1]
+                if math.fabs(dx1) + math.fabs(dy1) >= self.mhd_e:
+                    tmp.append(points[(j + 1) % len_point])
+                    index = j + 1
+
+            if len(tmp) <= 5:
+                dirty.append(i)
+                continue
+            per += (len(tmp) / len_point)
+            shapes[i]["points"] = tmp
+
+        per /= (len_shape - len(dirty))
+        for i in range(len(dirty)):
+            del shapes[dirty[i] - i]
+
+        print("曼哈顿处理后再保留：", per * 100, "%的点")
+        return shapes
 
 if __name__ == '__main__':
-    sometimes = lambda aug: iaa.Sometimes(0.5, aug)
-    image_id = 8
-
+    dataset_path = '/home/pengjinbo/kingpopen/Car/With_component/data/train'
+    image_id = 444
+    sometimes = lambda aug: iaa.Sometimes(0.8, aug)
     seq = iaa.Sequential([
-
-        iaa.SomeOf((0, 4),
-                   [
-                       sometimes(iaa.Dropout([0.05, 0.2])),  # drop 5% or 20% of all pixels
-                       sometimes(iaa.Sharpen((0.0, 1.0))),  # sharpen the image
-                       sometimes(iaa.Fliplr(0.2)),
-                       sometimes(iaa.Flipud(0.2)),
-                       sometimes(iaa.Affine(
-                           scale={"x": (0.8, 1.2), "y": (0.8, 1.2)},
-                           translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)},
-                           rotate=(-45, 45),
-                           shear=(-16, 16),
-                           order=[0, 1],
-                           cval=(0, 255),
-                           mode=ia.ALL
-                       )),
-                       sometimes(iaa.ElasticTransformation(alpha=50, sigma=5))
-                   ]),
-    ], random_order=True)
-
-    augmentation_demo(image_id, augmentation=seq)
-
-
+                    sometimes(iaa.Fliplr(0.5)),  # 左右翻转
+                    sometimes(iaa.Affine(
+                        scale={"x": (0.8, 1.2), "y": (0.8, 1.2)},
+                        translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)},
+                        rotate=(-45, 45),
+                        shear=(-16, 16),
+                        order=[0, 1],
+                        cval=(0, 255),
+                        mode=ia.ALL
+                    )),
+                    #sometimes(iaa.ElasticTransformation(alpha=50, sigma=5))
+                ], random_order=True)
+    augdataset = AugmentationDataset(dataset_path, seq, image_id)
+    augdataset.build()

@@ -2850,8 +2850,9 @@ class MaskRCNN():
         if os.name is 'nt':
             workers = 0
         else:
-            workers = 16 # multiprocessing.cpu_count()
+            workers = 4 # multiprocessing.cpu_count()
 
+        print("CPU workers are:", workers)
         print("prepare into keras_model_fit_generator")
         print("epochs:", epochs)
         print("initial_epoch:", self.epoch)
