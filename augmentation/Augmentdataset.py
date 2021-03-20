@@ -394,7 +394,7 @@ class AugmentationDataset():
 
 if __name__ == '__main__':
     dataset_path = '/home/pengjinbo/kingpopen/Car/With_component/data/train'
-    image_id = 444
+    image_id = 5555
     sometimes = lambda aug: iaa.Sometimes(0.8, aug)
     seq = iaa.Sequential([
                     sometimes(iaa.Fliplr(0.5)),  # 左右翻转
