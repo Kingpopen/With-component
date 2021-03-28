@@ -1,3 +1,5 @@
+import traceback
+
 from mrcnn.config import Config
 from mrcnn import model as modellib, utils
 from cococardamage import COCOCarDamage
@@ -20,7 +22,8 @@ DEFAULT_DATASET_YEAR = "2017"
 config = Config()
 ia.seed(2)
 
-label_value_to_name = { 1:"front bumper", 2:"rear bumper",
+# 160分类的id与名称对应关系
+label_160_value_to_name = { 1:"front bumper", 2:"rear bumper",
             3:"front bumper grille", 4:"front windshield",
             5:"rear windshield", 6:"front tire",
             7:"rear tire", 8:"front side glass",
@@ -37,6 +40,15 @@ label_value_to_name = { 1:"front bumper", 2:"rear bumper",
             29:"d pillar", 30:"bottom side",
             31:"rearview mirror", 32:"license plate"}
 
+label_52_value_to_name = {1: "front bumper", 2: "rear bumper", 3: "front fender",
+                        4: "rear fender", 5: "door", 6: "rear taillight", 7: "headlight",
+                        8: "hood", 9: "luggage cover", 10: "radiator grille", 11: "bottom side",
+                        12: "rearview mirror", 13: "license plate"
+}
+
+label_24_value_to_name = {1: "bumper", 2:"fender", 3:"light", 4:"rearview",
+                          5:"windshield", 6:"others"
+}
 
 class CarDamageDataset(utils.Dataset):
 
@@ -214,32 +226,42 @@ class CarDamageDataset(utils.Dataset):
 
 
 class AugmentationDataset():
-    def __init__(self, dataset_path, augmentation, image_id):
-        self.image_id = image_id
-        self.datset_path = dataset_path
-        self.dataset = CarDamageDataset()
-        self.dataset.load_cardamage(dataset_path, "train", year='2017')
-        self.dataset.prepare()
+    def __init__(self, dataset, augmentation, image_ids):
+        self.image_ids = image_ids
+        self.dataset = dataset
         self.augmentation = augmentation
         self.savedir = "/home/pengjinbo/kingpopen/Car/augmentation/"
-
+        
+        print("img ids :", self.dataset.image_ids)
+        
         self.mhd_e = 30
 
 
+
+
     def build(self):
-        image = self.dataset.load_image(self.image_id)
-        mask, class_ids, component_ids = self.dataset.load_mask(self.image_id)
-        filename = self.dataset.source_image_link(image_id)[-19:]
-        print("filename:", filename)
+        for image_id in image_ids:
+            image = self.dataset.load_image(image_id)
+            mask, class_ids, component_ids = self.dataset.load_mask(image_id)
+            filename = self.dataset.source_image_link(image_id)[-19:]
+            # print("filename:", filename)
+            print("image_id:", image_id)
+            # Store shapes before augmentation to compare
+            image_shape = image.shape
+            mask_shape = mask.shape
 
-        # Store shapes before augmentation to compare
-        image_shape = image.shape
-        mask_shape = mask.shape
+            # Make augmenters deterministic to apply similarly to images and masks
+            image, mask = self.img2aug_img(image, mask)
+            Height, Width, _ = image.shape
 
-        # Make augmenters deterministic to apply similarly to images and masks
-        image, mask = self.img2aug_img(image, mask)
-        Height, Width, _ = image.shape
-        self.mask2json(image, mask, class_ids, component_ids, filename, Height, Width)
+            assert image.shape == image_shape, "Augmentation shouldn't change image size"
+            assert mask.shape == mask_shape, "Augmentation shouldn't change mask size"
+
+            try:
+                self.mask2json(image, mask, class_ids, component_ids, filename, Height, Width)
+            except Exception:
+                print("filename:", filename)
+                traceback.print_exc()
 
 
     # 进行数据增强
@@ -248,33 +270,33 @@ class AugmentationDataset():
         image = det.augment_image(image)
         # Change mask to np.uint8 because imgaug doesn't support np.bool
         mask = det.augment_image(mask.astype(np.uint8))
-        print("the shape of mask:", mask.shape)
+        #print("the shape of mask:", mask.shape)
         return image, mask
 
     # 优化
     def optimize(self, shapes):
-        # 先进行斜率处理
+
         data = self.__xl(shapes)
         # 再进行曼哈顿距离处理
-        data = self.__mhd(shapes)
+        data = self.__mhd(data)
         return data
 
     # 将获取的mask转化为json
     def mask2json(self, image, mask, class_ids, component_ids, filename, imageHeight, imageWidth):
         num = mask.shape[2]
-        print("class_ids:", class_ids)
-        print("component_ids:", component_ids)
+        #print("class_ids:", class_ids)
+        #print("component_ids:", component_ids)
 
         shapes = []
         for index in range(num):
             instance = mask[:, :, index]
-            # origin label file don‘t consider the background， for example scratch is labeled as 0
+            # origin label file don‘t consider the background�?for example scratch is labeled as 0
             category = class_ids[index] - 1
             component = component_ids[index]
 
             contours, hierarchy = cv2.findContours(instance, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
             # print("contours:", contours)
-            print("the shape of contours:", np.array(contours).shape)
+            #print("the shape of contours:", np.array(contours).shape)
             contour = contours[0]
             points = []
             contour = contour.reshape(-1, 2)
@@ -285,7 +307,7 @@ class AugmentationDataset():
                 points.append(point)
 
             shape = {
-                "label": label_value_to_name[component],
+                "label": label_24_value_to_name[component],
                 "points": points,
                 "group_id": int(category),
                 "shape_type": "polygon",
@@ -350,13 +372,16 @@ class AugmentationDataset():
             per += (len(tmp) / len_point)
             shapes[i]["points"] = tmp
 
-        per /= (len_shape - len(dirty))
-        print("斜率处理后保留：", per * 100, "%%的点")
         for i in range(len(dirty)):
             del shapes[dirty[i] - i]
+        # if (len_shape - len(dirty)) != 0:
+        #     per /= (len_shape - len(dirty))
+        #     #print("斜率处理后保留：", per * 100, "%的点")
+        # else:
+        #     print("全都删完了~")
         return shapes
 
-    # 曼哈顿距离
+    # 曼哈顿距�?
     def __mhd(self, shapes):
         len_shape = len(shapes)
         dirty = []
@@ -385,29 +410,40 @@ class AugmentationDataset():
             per += (len(tmp) / len_point)
             shapes[i]["points"] = tmp
 
-        per /= (len_shape - len(dirty))
         for i in range(len(dirty)):
             del shapes[dirty[i] - i]
 
-        print("曼哈顿处理后再保留：", per * 100, "%的点")
+        # if (len_shape - len(dirty)) !=0:
+        #     per /= (len_shape - len(dirty))
+        #     print("曼哈顿处理后再保留：", per * 100, "%的点")
+        # else:
+        #     print("全都删完了~")
+
         return shapes
 
 if __name__ == '__main__':
-    dataset_path = '/home/pengjinbo/kingpopen/Car/With_component/data/train'
-    image_id = 5555
+    dataset_path = '/home/pengjinbo/kingpopen/Car/new_dataset/ali_dataset_multi/train'
+    datset_path = dataset_path
+    dataset = CarDamageDataset()
+    dataset.load_cardamage(dataset_path, "train", year='2017')
+    dataset.prepare()
+    image_ids = dataset.image_ids
+
+    image_ids = image_ids
+
     sometimes = lambda aug: iaa.Sometimes(0.8, aug)
     seq = iaa.Sequential([
-                    sometimes(iaa.Fliplr(0.5)),  # 左右翻转
-                    sometimes(iaa.Affine(
+                    iaa.Fliplr(0.5),  # 左右翻转
+                    iaa.Affine(
                         scale={"x": (0.8, 1.2), "y": (0.8, 1.2)},
                         translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)},
                         rotate=(-45, 45),
                         shear=(-16, 16),
-                        order=[0, 1],
-                        cval=(0, 255),
-                        mode=ia.ALL
-                    )),
-                    #sometimes(iaa.ElasticTransformation(alpha=50, sigma=5))
+                        #order=[0, 1],
+                        #cval=(0, 255),
+                        #mode=ia.ALL
+                    ),
+                    # sometimes(iaa.ElasticTransformation(alpha=50, sigma=5))
                 ], random_order=True)
-    augdataset = AugmentationDataset(dataset_path, seq, image_id)
+    augdataset = AugmentationDataset(dataset, seq, image_ids)
     augdataset.build()

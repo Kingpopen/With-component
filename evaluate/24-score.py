@@ -110,16 +110,16 @@ damage_name_to_value_24 = {
 seed = 10
 
 # 标注的json文件路径（原始160分类）
-jsonpath = "json_label"
+jsonpath = "C:\\Users\\Administrator\\Desktop\\0328-evaluation\\ali\\ali_test_json_label"
 # 存放转换后标注的json文件的路径
-label_json_path = "json_label_10"
+label_json_path = "C:\\Users\\Administrator\\Desktop\\0328-evaluation\\ali\\ali_test_json_label_10"
 # 预测json文件的路径
-predict_json_path = "infer_24_new"
+predict_json_path = "C:\\Users\\Administrator\\Desktop\\0328-evaluation\\ali\\ali_infer_json_label"
 
 # 存放标注mask的路径   ps:这两个存放mask的文件夹要先建好
-label_mask_path = "label_mask"
+label_mask_path = "C:\\Users\\Administrator\\Desktop\\0328-evaluation\\ali\\ali_label_mask"
 # 存放预测mask的路径
-predict_mask_path = "predict_mask"
+predict_mask_path = "C:\\Users\\Administrator\\Desktop\\0328-evaluation\\ali\\ali_infer_mask"
 
 # 存放结果1
 result1 = "result1.txt"
@@ -129,9 +129,10 @@ result2 = "result2.txt"
 
 # 将label_json转换为阿里云10分类json
 def tranform_160_to_10():
+    print("begin tranform...")
     files = os.listdir(jsonpath)
     despath = label_json_path
-    wrongpath = "wrong"
+    wrongpath = "C:\\Users\\Administrator\\Desktop\\0328-evaluation\\ali\\wrong"
 
     for filename in files:
         data = json.load(open(os.path.join(jsonpath, filename), encoding="UTF-8"))
@@ -241,6 +242,7 @@ def tranform_160_to_10():
         with open(filepath, "w") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
+    print("tranform over")
 
 # 制作mask
 def make_mask(json_path, mask_path, name_to_value):
@@ -249,7 +251,8 @@ def make_mask(json_path, mask_path, name_to_value):
     mask_path 是生成的mask保存路径（语义分割类型mask）
     '''
     files = os.listdir(json_path)
-
+    print("begin make_mask")
+    cnt = 0
     # 制作预测的mask标签
     for jsonfile in files:
         filename = jsonfile[:-5]
@@ -267,20 +270,30 @@ def make_mask(json_path, mask_path, name_to_value):
         else:
             img = utils.img_b64_to_arr(imageData)
         try:
-            lbl = utils.shapes_to_label(img.shape, data["shapes"], name_to_value)
-        except AssertionError:
-            print("get mask failed:", filename)
-        else:
+            lbl, _ = utils.shapes_to_label(img.shape, data["shapes"], name_to_value)
+
+            # lbl = np.array(lbl)
+            # print("lbl:", lbl)
+            # print("unique", np.unique(lbl))
+            # print("lbl shape is:", lbl.shape)
+
             w, h = lbl.shape
             # print(lbl)
             # class_index = np.unique(lbl)
             # print(class_index)
             cv2.imwrite(os.path.join(mask_path, filename + ".png"), lbl.reshape(w, h, -1))
             # print(filename + ".mask is completed")
+            cnt += 1
+            print("cnt:", cnt)
+        except AssertionError:
+            print("get mask failed:", filename)
 
+
+    print("make mask over")
 
 def count_aliyun(name_to_value):
     # 根据是否识别计算
+    print("count aliyun")
 
     # 统计各损伤数目
     right_damage = [0] * 10
@@ -288,7 +301,7 @@ def count_aliyun(name_to_value):
     predict_damage = [0] * 10
 
     files = os.listdir(predict_json_path)
-
+    cnt = 0
     for filename in files:
         try:
             predict_data = json.load(open(os.path.join(predict_json_path, filename), encoding="gbk"))

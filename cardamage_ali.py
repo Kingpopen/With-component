@@ -90,25 +90,24 @@ DEFAULT_DATASET_YEAR = "2014"
 #  Configurations
 ############################################################
 
-# 配置文件
 class CarDamageConfig(Config):
     """Configuration for training on MS COCO.
     Derives from the base Config class and overrides values specific
     to the COCO dataset.
     """
     # Give the configuration a recognizable name
-    NAME = "Cardamage_ali"
+    NAME = "New_Cardamage_baidu"
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
     # self.IMAGES_PER_GPU * self.GPU_COUNT
-    IMAGES_PER_GPU = 2
+    IMAGES_PER_GPU = 1
 
     # Uncomment to train on 8 GPUs (default is 1)
     GPU_COUNT = 1
 
     # Number of classes (including background)
-    # NUM_CLASSES = 1 + 8  # 只需要餐具的种类数即可，不需要材料的种类?
+    # NUM_CLASSES = 1 + 8  # 鍙渶瑕侀鍏风殑绉嶇被鏁板嵆鍙紝涓嶉渶瑕佹潗鏂欑殑绉嶇被?
     # NUM_MATERIALS = 1 + 5
     NUM_CLASSES = 1 + 4
     NUM_COMPONENTS = 1 + 6
@@ -135,9 +134,6 @@ class CarDamageConfig(Config):
 #  Dataset
 ############################################################
 
-# 数据集导入dataset?
-
-# 输入的数据集跟coco数据集格式类?
 '''
 "images":...
 "annotations":
@@ -153,12 +149,7 @@ class CarDamageConfig(Config):
 
 
 class CarDamageDataset(utils.Dataset):
-    '''
-    要使用Mask R-CNN训练自己的数据集，需要写一个自己的MediaDataset类（继承utils.Dataset类），并自己写以下几个方法：
-    1. load_media，即读取数据�?
-    2. load_mask，即将数据集中的segmentation转化为mask
-    下面看到的其他方法都是上述两个方法的附带�?
-    '''
+
 
     def load_cardamage(self, dataset_dir, subset, year=DEFAULT_DATASET_YEAR, class_ids=None, component_ids=None,
                   class_map=None, return_coco=False):
@@ -183,11 +174,11 @@ class CarDamageDataset(utils.Dataset):
             # All classes
             class_ids = sorted(coco.getCatIds())
 
-        # 添加零件类别
+
         if not component_ids:
             component_ids = sorted(coco.getCompIds())
 
-        # All images or a subset?  所有图片还是一个子�?
+        # All images or a subse
         if component_ids:
             image_ids = []
             for id in component_ids:
@@ -219,7 +210,6 @@ class CarDamageDataset(utils.Dataset):
             return coco
 
 
-    # 类别的初始化，保证self.component_info中包含所有的�?
     def add_component(self, source, component_id, component_name):
         assert "." not in source, "Source name cannot contain a dot"
         # Does the class exist already?
@@ -261,7 +251,7 @@ class CarDamageDataset(utils.Dataset):
             class_id = self.map_source_class_id(
                 "coco.{}".format(annotation['category_id']))
 
-            # 添加零件分支
+
             component_id = self.map_source_component_id(
                 "coco.{}".format(annotation['component_id']))
 
@@ -282,14 +272,14 @@ class CarDamageDataset(utils.Dataset):
                         m = np.ones([image_info["height"], image_info["width"]], dtype=bool)
                 instance_masks.append(m)
                 class_ids.append(class_id)
-                # 添加零件分支
+
                 component_ids.append(component_id)
 
         # Pack instance masks into an array
         if class_ids:
             mask = np.stack(instance_masks, axis=2).astype(np.bool)
             class_ids = np.array(class_ids, dtype=np.int32)
-            #添加零件分支
+
             component_ids = np.array(component_ids, dtype=np.int32)
             return mask, class_ids, component_ids
         else:
@@ -305,7 +295,6 @@ class CarDamageDataset(utils.Dataset):
             super(CarDamageDataset, self).image_reference(image_id)
     # The following two functions are from pycocotools with a few changes.
 
-    # RLE是一个微软的压缩格式
     def annToRLE(self, ann, height, width):
         """
         Convert annotation which can be polygons, uncompressed RLE to RLE.
@@ -337,7 +326,7 @@ class CarDamageDataset(utils.Dataset):
 
 def train(model):
     dataset_train = CarDamageDataset()
-    dataset_train.load_cardamage('/home/pengjinbo/kingpopen/Car/dataset1_ali/train/', "train", year='2017')
+    dataset_train.load_cardamage('/home/pengjinbo/kingpopen/Car/new_dataset/ali_dataset_multi/train/', "train", year='2017')
     dataset_train.prepare()
 
     num_train = len(dataset_train.image_ids)
@@ -345,13 +334,13 @@ def train(model):
     # print("train dataset ok")
 
     dataset_val = CarDamageDataset()
-    dataset_val.load_cardamage('/home/pengjinbo/kingpopen/Car/dataset1_ali/val/', "val", year='2017')
+    dataset_val.load_cardamage('/home/pengjinbo/kingpopen/Car/new_dataset/ali_dataset_multi/val/', "val", year='2017')
     dataset_val.prepare()
 
     num_val = len(dataset_val.image_ids)
     print("num_val:", num_val)
 
-    config.STEPS_PER_EPOCH = num_train // (config.GPU_COUNT * config.IMAGES_PER_GPU)
+    config.STEPS_PER_EPOCH = int(num_train // (config.GPU_COUNT * config.IMAGES_PER_GPU)*0.8)
     config.VALIDATION_STEPS = num_val // (config.GPU_COUNT * config.IMAGES_PER_GPU)
     CarDamageConfig.STEPS_PER_EPOCH = config.STEPS_PER_EPOCH
     CarDamageConfig.VALIDATION_STEPS = config.VALIDATION_STEPS
@@ -360,56 +349,23 @@ def train(model):
     # Since we're using a very small dataset, and starting from
     # COCO trained weights, we don't need to train too long. Also,
     # no need to train all layers, just the heads should do it.
-    # 在默认的config（MediaConfig类）中，默认将mrcnn_material_loss的权重设�?
-    # 也就是说，不训练material的分类，先做好原先的餐具分类、找轮廓的任�?
 
     # Training - Stage 1
     print("Training network heads")
     # augmentation = imgaug.augmenters.Fliplr(0.5)
-
-    sometimes = lambda aug: iaa.Sometimes(0.5, aug)
-    augmentation = iaa.Sequential([
-
-        iaa.SomeOf((0, 4),
-                   [
-                       sometimes(iaa.Dropout([0.05, 0.2])),  # drop 5% or 20% of all pixels
-                       sometimes(iaa.Sharpen((0.0, 1.0))),  # sharpen the image
-                       sometimes(iaa.Fliplr(0.2)),
-                       sometimes(iaa.Flipud(0.2)),
-                       sometimes(iaa.Affine(
-                           scale={"x": (0.8, 1.2), "y": (0.8, 1.2)},
-                           translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)},
-                           rotate=(-45, 45),
-                           shear=(-16, 16),
-                           order=[0, 1],
-                           cval=(0, 255),
-                           mode=ia.ALL
-                       )),
-                       sometimes(iaa.ElasticTransformation(alpha=50, sigma=5))
-                   ]),
-    ], random_order=True)
-
-    # model.train(dataset_train, dataset_val,
-    #             learning_rate=config.LEARNING_RATE,
-    #             epochs=4,
-    #             layers='heads-no-component',
-    #             augmentation=augmentation)
+    model.train(dataset_train, dataset_val,
+                learning_rate=config.LEARNING_RATE,
+                epochs=4,
+                layers='heads-no-component')
     print("Stage1 Over")
-
-    model.load_weights(
-        "/home/pengjinbo/kingpopen/Car/With_component/logs/cardamage_ali20210312T1920/mask_rcnn_cardamage_ali_0006.h5")
-
     # Training - Stage 2
     # Finetune layers from ResNet stage 4 and up
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE,
                 epochs=10,
-                layers='4+',
-                augmentation=augmentation)
+                layers='4+')
     print("Stage2 Over")
-    # 在训练好原有任务后，开始训练material的分类，此时需要建立一个新的config
-    # 该config继承了MediaConfig类，并将各个损失的权重做了调?
-    # 此时loss会明显上升，毕竟考虑了一个额外的material_loss，让他正常训练就可以?
+
     class ComponentConfig(CarDamageConfig):
         LOSS_WEIGHTS = {
             "rpn_class_loss": 1.,
@@ -421,7 +377,7 @@ def train(model):
         }
     def create_load_last(config):
         '''
-        根据新的config，创建新的model
+
         :param config:
         :return:
         '''
@@ -431,13 +387,11 @@ def train(model):
         model.load_weights(model_path, by_name=True)
         # model.load_weights("/home/pengjinbo/kingpopen/Car/With_component/logs/cardamage20210219T2110/mask_rcnn_cardamage_0015.h5", by_name=True)
         return model
-    # 实例化MaterialConfig类，根据这个config实例创建新的model
     model = create_load_last(ComponentConfig())
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE / 2,
                 epochs=14,
-                layers='component-classifiers',
-                augmentation=augmentation)
+                layers='component-classifiers')
     print("Stage3 Over")
 
     # componentconfig = ComponentConfig()
@@ -454,16 +408,14 @@ def train(model):
 
     class AlllayerConfig(ComponentConfig):
         '''
-        由于显存资源不足，需要在这个时候调低IMAGES_PER_GPU�?
-        如果在中途想修改config的内容，可以用这种继承的方法去写�?
+        yes
         '''
 
     model = create_load_last(AlllayerConfig())
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE / 10,
-                epochs=17,
-                layers='all',
-                augmentation=augmentation)
+                epochs=18,
+                layers='all')
     print("Stage4 Over")
 
     # alllayerconfig = AlllayerConfig()
@@ -483,7 +435,7 @@ def train(model):
 ###########
 # Evalution
 ###########
-# mask转化为segmentation（mask是圈内每一个点的坐标，segmentation是圈边缘的坐标）
+
 def mask_to_seg(mask):
     seg = []
     # Mask Polygon
@@ -499,16 +451,12 @@ def mask_to_seg(mask):
     return seg
 
 
-# 将评测的结果保存为json格式
+
 def save_to_json(imageHeight, imageWidth, boxes, masks, class_ids, component_ids,
                  save_name, save_dir):
     class_names = ['__background', 'scratch', 'indentation', 'crack', 'perforation']
-    # component_names = ['__background', 'front bumper', 'rear bumper', 'front fender',
-    #                    'rear fender', 'door', 'rear taillight', 'headlight',
-    #                    'hood', 'luggage cover', 'radiator grille', 'bottom side',
-    #                    'rearview mirror', 'license plate']
-
     component_names = ['__background', "bumper", "fender", "light", "rearview", "windshield", "others"]
+
 
     N = boxes.shape[0]
     bbox = []
@@ -725,19 +673,19 @@ if __name__ == '__main__':
     # Train or evaluate
     if args.command == "train":
         train(model)
-    elif args.command == "evaluate":
+    elif args.command == "inference":
         # Validation dataset
         model.load_weights(
-            '/home/pengjinbo/kingpopen/Car/With_component/logs/cardamage20210228T2129/mask_rcnn_cardamage_0025.h5',
+            '/home/pengjinbo/kingpopen/Car/With_component/logs/new_cardamage_ali20210322T1042/mask_rcnn_new_cardamage_ali_0018.h5',
             by_name=True)
         dataset_test = CarDamageDataset()
-        coco = dataset_test.load_cardamage('/home/pengjinbo/kingpopen/Car/dataset2/unified_test/', 'unified_test', '2017', return_coco=True)
+        coco = dataset_test.load_cardamage('/home/pengjinbo/kingpopen/Car/new_dataset/ali_dataset_multi/test/', 'test', '2017', return_coco=True)
         dataset_test.prepare()
 
         print("len of dataset_test:", len(dataset_test.image_ids))
 
         print("Running COCO evaluation on {} images.".format(args.limit))
-        evaluate_coco(model, dataset_test, limit=0, image_ids=None, save_dir="/home/pengjinbo/kingpopen/Car/With_component/for_cardamage/unified_test2_result_json/")
+        evaluate_coco(model, dataset_test, limit=0, image_ids=None, save_dir="/home/pengjinbo/kingpopen/Car/With_component/for_cardamage/test_new_ali_result_json/")
     else:
         print("'{}' is not recognized. "
               "Use 'train' or 'evaluate'".format(args.command))
